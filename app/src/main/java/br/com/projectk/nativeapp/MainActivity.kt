@@ -1,28 +1,42 @@
 package br.com.projectk.nativeapp
 
 import android.app.Activity
-import android.os.Bundle
-import android.text.Html
+import android.content.Intent
 import android.graphics.Color
+import android.graphics.Outline
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.net.Uri
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.CookieHandler
 import java.net.CookieManager
 import java.net.CookiePolicy
-import java.net.CookieHandler
+import java.net.HttpCookie
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
-    private val baseUrl = "https://projectspacek.squareweb.app"
+    private val baseUrl = Net.BASE
     private val red = Color.rgb(220, 35, 55)
     private val bg = Color.rgb(18, 18, 22)
     private val panel = Color.rgb(29, 29, 35)
@@ -34,6 +48,23 @@ class MainActivity : Activity() {
     private lateinit var loginButton: Button
     private var busy = false
 
+    private val ink = Color.rgb(8, 9, 14)
+    private val glass = Color.rgb(23, 25, 35)
+    private val muted = Color.rgb(160, 164, 181)
+    private val violet = Color.rgb(157, 111, 255)
+    private val errorColor = Color.rgb(255, 120, 130)
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var token = 0
+    private var activeTab = "Início"
+    private lateinit var content: LinearLayout
+    private lateinit var scrollRef: ScrollView
+    private var meUser: String? = null
+    private var pollTask: Runnable? = null
+
+    private var pickedUri: Uri? = null
+    private var pickedLabel: TextView? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -44,7 +75,94 @@ class MainActivity : Activity() {
             CookieManager(null, CookiePolicy.ACCEPT_ALL)
         )
 
+        if (restoreCookies()) {
+            val splash = TextView(this).apply {
+                text = "Entrando…"
+                textSize = 16f
+                setTextColor(Color.LTGRAY)
+                gravity = Gravity.CENTER
+                setBackgroundColor(bg)
+            }
+            setContentView(splash)
+            thread {
+                val ok = try {
+                    Net.get("/home")
+                    true
+                } catch (e: Exception) {
+                    false
+                }
+                runOnUiThread {
+                    if (ok) showHome("") else showLogin()
+                }
+            }
+        } else {
+            showLogin()
+        }
+    }
+
+    override fun onDestroy() {
+        stopPoll()
+        super.onDestroy()
+    }
+
+    override fun onBackPressed() {
+        if (backAction != null) {
+            val b = backAction
+            b?.invoke()
+        } else if (activeTab != "Início" && ::content.isInitialized) {
+            showFeed()
+        } else {
+            super.onBackPressed()
+        }
+    }
+
+    // ---------- sessão (cookies) ----------
+    private fun prefs() = getSharedPreferences("projectk", MODE_PRIVATE)
+
+    private fun saveCookies() {
+        try {
+            val store = (CookieHandler.getDefault() as CookieManager).cookieStore
+            val arr = JSONArray()
+            for (c in store.cookies) {
+                arr.put(JSONObject().put("n", c.name).put("v", c.value).put("p", c.path ?: "/").put("s", c.secure))
+            }
+            prefs().edit().putString("cookies", arr.toString()).apply()
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun restoreCookies(): Boolean {
+        return try {
+            val s = prefs().getString("cookies", null) ?: return false
+            val arr = JSONArray(s)
+            val store = (CookieHandler.getDefault() as CookieManager).cookieStore
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val c = HttpCookie(o.getString("n"), o.getString("v"))
+                c.path = o.optString("p", "/")
+                c.secure = o.optBoolean("s")
+                store.add(URI(Net.BASE), c)
+            }
+            arr.length() > 0
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun logout() {
+        try {
+            (CookieHandler.getDefault() as? CookieManager)?.cookieStore?.removeAll()
+        } catch (e: Exception) {
+        }
+        prefs().edit().remove("cookies").apply()
+        meUser = null
+        stopPoll()
         showLogin()
+    }
+
+    private fun sessionLost() {
+        Toast.makeText(this, "Sessão expirada. Entre novamente.", Toast.LENGTH_LONG).show()
+        logout()
     }
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
@@ -251,18 +369,13 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun enc(value: String): String =
-        URLEncoder.encode(value, "UTF-8")
+    private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 
-    private var activeTab = "Início"
+    // ---------- utilidades de interface ----------
+    private var backAction: (() -> Unit)? = null
 
-    private val ink = Color.rgb(8, 9, 14)
-    private val glass = Color.rgb(23, 25, 35)
-    private val muted = Color.rgb(160, 164, 181)
-    private val violet = Color.rgb(157, 111, 255)
-
-    private fun rounded(color: Int, radius: Float = 22f): android.graphics.drawable.GradientDrawable {
-        return android.graphics.drawable.GradientDrawable().apply {
+    private fun rounded(color: Int, radius: Float = 22f): GradientDrawable {
+        return GradientDrawable().apply {
             setColor(color)
             cornerRadius = radius * resources.displayMetrics.density
             setStroke(dp(1), Color.argb(45, 190, 180, 255))
@@ -281,336 +394,1020 @@ class MainActivity : Activity() {
     private fun card(): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(17), dp(15), dp(17), dp(15))
+            setPadding(dp(15), dp(13), dp(15), dp(13))
             background = rounded(glass)
-            layoutParams = params().apply { bottomMargin = dp(13) }
+            layoutParams = params().apply { bottomMargin = dp(11) }
         }
     }
 
     private fun addLine(parent: LinearLayout, value: String, size: Float = 14f, color: Int = Color.WHITE) {
-        parent.addView(text(value, size, color), params().apply {
-            bottomMargin = dp(7)
-        })
+        parent.addView(text(value, size, color), params().apply { bottomMargin = dp(5) })
     }
 
     private fun pill(value: String, action: () -> Unit): TextView {
         return text(value, 13f, Color.WHITE).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(15), dp(11), dp(15), dp(11))
+            setPadding(dp(14), dp(10), dp(14), dp(10))
             background = rounded(Color.rgb(43, 36, 65), 18f)
             setOnClickListener { action() }
         }
     }
 
+    private fun toast(m: String) {
+        Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
+    }
 
-    private fun fetchPage(path: String): String {
-        val conn = (URL("$baseUrl$path").openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 15000
-            readTimeout = 20000
-            instanceFollowRedirects = true
-            setRequestProperty("Accept", "text/html")
-            setRequestProperty("User-Agent", "ProjectK-Android/0.2")
-        }
-        return try {
-            val code = conn.responseCode
-            val stream = if (code < 400) conn.inputStream else conn.errorStream
-            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            if (code >= 400) throw Exception("HTTP $code")
-            if (conn.url.path.trimEnd('/').endsWith("/login")) {
-                throw Exception("Sessão expirada. Entre novamente.")
+    private fun fieldBox(hintText: String, multi: Boolean = false): EditText {
+        return EditText(this).apply {
+            hint = hintText
+            setHintTextColor(muted)
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(glass, 16f)
+            if (multi) {
+                minLines = 4
+                gravity = Gravity.TOP
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                    android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            } else {
+                setSingleLine(true)
+                inputType = android.text.InputType.TYPE_CLASS_TEXT
             }
-            body
-        } finally {
-            conn.disconnect()
         }
     }
 
+    private fun avatarView(url: String?, name: String, sizeDp: Int): View {
+        val lp = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+        val round = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setOval(0, 0, view.width, view.height)
+            }
+        }
+        if (url != null) {
+            val iv = ImageView(this)
+            iv.scaleType = ImageView.ScaleType.CENTER_CROP
+            iv.setBackgroundColor(Color.rgb(43, 36, 65))
+            iv.outlineProvider = round
+            iv.clipToOutline = true
+            iv.layoutParams = lp
+            Img.load(url, iv, 256)
+            return iv
+        }
+        val tv = TextView(this)
+        tv.text = (name.trim().firstOrNull() ?: '?').uppercaseChar().toString()
+        tv.gravity = Gravity.CENTER
+        tv.textSize = (sizeDp / 2.4f)
+        tv.setTextColor(Color.WHITE)
+        tv.setBackgroundColor(Color.rgb(60, 45, 100))
+        tv.outlineProvider = round
+        tv.clipToOutline = true
+        tv.layoutParams = lp
+        return tv
+    }
 
-    private fun loadRealFeed(onResult: (List<String>, String?) -> Unit) {
+    private fun imageBlock(url: String): ImageView {
+        val iv = ImageView(this)
+        iv.adjustViewBounds = true
+        iv.scaleType = ImageView.ScaleType.FIT_CENTER
+        iv.maxHeight = dp(420)
+        iv.layoutParams = params().apply { topMargin = dp(8); bottomMargin = dp(4) }
+        Img.load(url, iv, 1080)
+        return iv
+    }
+
+    private fun stopPoll() {
+        pollTask?.let { handler.removeCallbacks(it) }
+        pollTask = null
+    }
+
+    private fun startPoll(everyMs: Long, fn: () -> Unit) {
+        stopPoll()
+        val sid = token
+        val t = object : Runnable {
+            override fun run() {
+                if (sid != token) return
+                fn()
+                handler.postDelayed(this, everyMs)
+            }
+        }
+        pollTask = t
+        handler.postDelayed(t, everyMs)
+    }
+
+    /** Executa [work] fora da tela principal e entrega o resultado só se a tela ainda for a mesma. */
+    private fun <T> async(work: () -> T, done: (T) -> Unit, fail: ((String) -> Unit)? = null) {
+        val sid = token
         thread {
             try {
-                val html = fetchPage("/home")
-                val extracted = Regex(
-                    """(?is)<article\b[^>]*>(.*?)</article>"""
-                ).findAll(html).map { match ->
-                    Html.fromHtml(
-                        match.groupValues[1]
-                            .replace(Regex("(?is)<(script|style)\b.*?</\\1>"), "")
-                            .replace(Regex("(?is)<img\b[^>]*>"), " [imagem] "),
-                        Html.FROM_HTML_MODE_COMPACT
-                    ).toString().replace(Regex("\\s+"), " ").trim()
-                }.filter { it.isNotBlank() && it.length > 8 }.toList()
-
-                runOnUiThread { onResult(extracted, null) }
+                val r = work()
+                runOnUiThread { if (sid == token) done(r) }
+            } catch (e: SessionExpired) {
+                runOnUiThread { sessionLost() }
             } catch (e: Exception) {
+                val m = e.message ?: e.javaClass.simpleName
                 runOnUiThread {
-                    onResult(emptyList(), e.message ?: "erro desconhecido")
+                    if (sid == token) {
+                        if (fail != null) fail(m) else addLine(content, "Falha: $m", 13f, errorColor)
+                    }
                 }
             }
         }
     }
 
-    private fun showHome(message: String) {
-        renderTab("Início", message)
-    }
-
-    private fun renderTab(tab: String, message: String = "") {
+    private fun screen(
+        tab: String, title: String, back: (() -> Unit)? = null,
+        action: View? = null, footer: View? = null
+    ): LinearLayout {
+        token++
+        stopPoll()
+        backAction = back
         activeTab = tab
         window.statusBarColor = ink
         window.navigationBarColor = ink
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(ink)
         }
-
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(19), dp(13), dp(19), dp(13))
+            setPadding(dp(16), dp(12), dp(16), dp(8))
         }
-
-        val brand = text("K", 29f, violet).apply {
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        if (back != null) {
+            val b = text("‹", 30f, violet)
+            b.setPadding(dp(4), 0, dp(14), dp(4))
+            b.setOnClickListener { back() }
+            top.addView(b)
+        } else {
+            val k = text("K", 29f, violet)
+            k.typeface = Typeface.DEFAULT_BOLD
+            k.setPadding(dp(2), 0, dp(12), 0)
+            top.addView(k)
         }
-        top.addView(brand, LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.WRAP_CONTENT))
-        val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        heading.addView(text("PROJECT K", 13f, Color.WHITE).apply {
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-        })
-        heading.addView(text("seu espaço, do seu jeito", 11f, muted))
-        top.addView(heading, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(pill("＋", { newPost() }))
+        val t = text(title, 19f)
+        t.typeface = Typeface.DEFAULT_BOLD
+        t.maxLines = 1
+        t.ellipsize = TextUtils.TruncateAt.END
+        top.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        if (action != null) top.addView(action)
         page.addView(top)
 
-        val scroll = ScrollView(this).apply {
-            isFillViewport = false
-            clipToPadding = false
-            setPadding(dp(16), dp(8), dp(16), dp(12))
-        }
-        val content = LinearLayout(this).apply {
+        val scroll = ScrollView(this)
+        scrollRef = scroll
+        val c = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(4), dp(16), dp(12))
         }
-        scroll.addView(content)
-        page.addView(scroll, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
-        ))
+        scroll.addView(c)
+        page.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        if (footer != null) page.addView(footer, params())
+        page.addView(navBar(tab), params().apply { setMargins(dp(12), dp(4), dp(12), dp(8)) })
+        setContentView(page)
+        content = c
+        return c
+    }
 
-        when (tab) {
-            "Início" -> {
-                val hero = card().apply {
-                    background = rounded(Color.rgb(36, 27, 58), 26f)
-                }
-                addLine(hero, "SEU CANTO NA INTERNET", 11f, violet)
-                addLine(hero, "Um lugar para ser você.", 25f)
-                addLine(hero, "Explore ideias, pessoas e comunidades.", 13f, muted)
-                hero.addView(pill("＋ Criar publicação", { newPost() }))
-                content.addView(hero)
-
-                addLine(content, "Seu feed", 21f)
-                addLine(content, "O que está acontecendo por aí", 12f, muted)
-
-                val feedStatus = text("Carregando publicações reais…", 14f, muted)
-                content.addView(feedStatus, params())
-
-                loadRealFeed { posts, error ->
-                    content.removeView(feedStatus)
-
-                    if (posts.isEmpty()) {
-                        val detail = if (error != null) {
-                            "Falha ao carregar: $error"
-                        } else {
-                            "O HTML chegou, mas não encontrei blocos article. Precisamos ajustar o extrator."
-                        }
-                        addLine(content, detail, 13f, muted)
-                    } else {
-                        addLine(content, "Publicações reais", 18f, violet)
-                        posts.forEach { postText ->
-                            val postCard = card()
-                            addLine(postCard, postText, 14f)
-                            content.addView(postCard)
-                        }
-                    }
-                }
-                if (message.isNotBlank()) addLine(content, message, 11f, muted)
-            }
-            "Buscar" -> {
-                addLine(content, "Descobrir", 27f)
-                addLine(content, "Encontre assuntos e pessoas.", 13f, muted)
-                val search = EditText(this).apply {
-                    hint = "Buscar no Project K"
-                    setHintTextColor(muted)
-                    setTextColor(Color.WHITE)
-                    textSize = 15f
-                    setSingleLine(true)
-                    setPadding(dp(15), dp(13), dp(15), dp(13))
-                    background = rounded(glass)
-                }
-                content.addView(search, params().apply { topMargin = dp(14); bottomMargin = dp(18) })
-                addLine(content, "Assuntos em destaque", 18f)
-                listOf("# dreamcore", "# tecnologia", "# jogos", "# música", "# fotografia").forEachIndexed { i, v ->
-                    val c = card()
-                    addLine(c, "0${i + 1}    $v", 16f)
-                    addLine(c, "Explore publicações sobre este assunto", 12f, muted)
-                    content.addView(c)
-                }
-            }
-            "Salas" -> {
-                addLine(content, "Salas & comunidades", 25f)
-                addLine(content, "Espaços para encontrar sua galera.", 13f, muted)
-                listOf(
-                    Triple("Dreamspace", "Arte, sonhos e lugares liminares", "128 membros"),
-                    Triple("Pixel Club", "Jogos, mods e projetos independentes", "86 membros"),
-                    Triple("After Hours", "Conversas tranquilas sem pressa", "42 membros")
-                ).forEach { item ->
-                    val c = card()
-                    addLine(c, "◈  ${item.first}", 18f)
-                    addLine(c, item.second, 13f, muted)
-                    c.addView(pill(item.third + "  ·  Ver sala", {
-                        Toast.makeText(this, "Tela demonstrativa: sala ainda não conectada.", Toast.LENGTH_SHORT).show()
-                    }))
-                    content.addView(c)
-                }
-            }
-            "Chat" -> {
-                addLine(content, "Mensagens", 27f)
-                addLine(content, "Suas conversas em um só lugar.", 13f, muted)
-                listOf(
-                    Triple("Mika", "me manda aquele link depois!", "09:42"),
-                    Triple("Dreamspace", "nova conversa na comunidade", "Ontem"),
-                    Triple("Rin", "essa estética ficou muito boa", "Seg.")
-                ).forEach { item ->
-                    val c = card()
-                    val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                    row.addView(text("◉", 26f, violet), LinearLayout.LayoutParams(dp(45), ViewGroup.LayoutParams.WRAP_CONTENT))
-                    val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                    addLine(details, item.first, 16f)
-                    addLine(details, item.second, 12f, muted)
-                    row.addView(details, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                    row.addView(text(item.third, 11f, muted))
-                    c.addView(row)
-                    c.setOnClickListener {
-                        Toast.makeText(this, "Conversas reais ainda não conectadas.", Toast.LENGTH_SHORT).show()
-                    }
-                    content.addView(c)
-                }
-            }
-            "Perfil" -> {
-                val cover = card().apply {
-                    minimumHeight = dp(110)
-                    gravity = Gravity.BOTTOM
-                    background = rounded(Color.rgb(48, 35, 77), 25f)
-                }
-                addLine(cover, "PROJECT K  /  PROFILE", 11f, violet)
-                content.addView(cover)
-                val profile = card()
-                addLine(profile, "◉", 39f, violet)
-                addLine(profile, "Usuário do Project K", 22f)
-                addLine(profile, "@seu_usuario", 13f, muted)
-                addLine(profile, "Sua bio aparece aqui. Personalize seu espaço e compartilhe o que importa.", 14f)
-                val stats = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                listOf("0 publicações", "0 seguidores", "0 seguindo").forEach {
-                    stats.addView(text(it, 11f, muted), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                }
-                profile.addView(stats)
-                content.addView(profile)
-                val note = card()
-                addLine(note, "Ainda em construção", 16f)
-                addLine(note, "Perfil, publicações e seguidores serão ligados aos dados reais numa próxima etapa.", 13f, muted)
-                content.addView(note)
-                content.addView(makeButton("Sair da conta") {
-                    (CookieHandler.getDefault() as? CookieManager)?.cookieStore?.removeAll()
-                    showLogin()
-                }, params())
-            }
-        }
-
+    private fun navBar(tab: String): LinearLayout {
         val nav = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dp(5), dp(8), dp(5), dp(8))
             background = rounded(Color.rgb(18, 19, 28), 20f)
         }
-        listOf("Início", "Buscar", "Salas", "Chat", "Perfil").forEach { name ->
-            val selected = name == tab
-            val item = TextView(this).apply {
-                text = when (name) {
-                    "Início" -> "⌂\nInício"
-                    "Buscar" -> "⌕\nBuscar"
-                    "Salas" -> "◇\nSalas"
-                    "Chat" -> "▤\nChat"
-                    else -> "◉\nPerfil"
-                }
-                gravity = Gravity.CENTER
-                textSize = 11f
-                setTextColor(if (selected) violet else muted)
-                setPadding(dp(2), dp(5), dp(2), dp(5))
-                setOnClickListener { renderTab(name) }
+        for (name in listOf("Início", "Buscar", "Salas", "Chat", "Perfil")) {
+            val item = TextView(this)
+            item.text = when (name) {
+                "Início" -> "⌂\nInício"
+                "Buscar" -> "⌕\nBuscar"
+                "Salas" -> "◇\nSalas"
+                "Chat" -> "▤\nChat"
+                else -> "◉\nPerfil"
             }
+            item.gravity = Gravity.CENTER
+            item.textSize = 11f
+            item.setTextColor(if (name == tab) violet else muted)
+            item.setPadding(dp(2), dp(5), dp(2), dp(5))
+            item.setOnClickListener { openTab(name) }
             nav.addView(item, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
-        page.addView(nav, params().apply {
-            setMargins(dp(12), dp(4), dp(12), dp(8))
-        })
-        setContentView(page)
+        return nav
     }
 
-    private fun newPost() {
-        val box = EditText(this).apply {
-            hint = "O que está acontecendo?"
-            setHintTextColor(muted)
-            setTextColor(Color.WHITE)
-            textSize = 16f
-            minLines = 4
-            gravity = Gravity.TOP
-            setPadding(dp(14), dp(14), dp(14), dp(14))
-            background = rounded(glass)
+    private fun openTab(name: String) {
+        when (name) {
+            "Início" -> showFeed()
+            "Buscar" -> showSearch("")
+            "Salas" -> showRooms()
+            "Chat" -> showChats()
+            else -> showProfile(null)
         }
-        val wrap = LinearLayout(this).apply {
+    }
+
+    private fun showHome(message: String) {
+        saveCookies()
+        showFeed()
+        if (message.isNotBlank()) toast("Login confirmado.")
+    }
+
+    // ---------- Início ----------
+    private fun postCard(p: Post): LinearLayout {
+        val c = card()
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        head.addView(avatarView(p.avatar, p.name, 40))
+        val who = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(12), dp(20), dp(8))
-            setBackgroundColor(ink)
-            addView(text("Nova publicação", 23f), params())
-            addView(text("Rascunho local de demonstração", 12f, muted), params())
-            addView(box, params().apply { topMargin = dp(16); bottomMargin = dp(14) })
-            addView(makeButton("Voltar ao feed") { renderTab("Início") }, params())
+            setPadding(dp(10), 0, 0, 0)
         }
-        setContentView(wrap)
+        who.addView(text(p.name, 15f).apply { typeface = Typeface.DEFAULT_BOLD })
+        who.addView(text("@${p.username}  ·  ${p.time}", 11f, muted))
+        head.addView(who, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.setOnClickListener { showProfile(p.username) }
+        c.addView(head)
+        if (p.text.isNotBlank()) {
+            c.addView(text(p.text, 15f).apply { setPadding(dp(2), dp(10), dp(2), dp(2)) })
+        }
+        if (p.media != null) c.addView(imageBlock(p.media))
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        fun heart() = (if (p.liked) "♥ " else "♡ ") + p.likes
+        val like = text(heart(), 14f, if (p.liked) violet else muted)
+        like.setPadding(dp(2), dp(6), dp(18), dp(6))
+        like.setOnClickListener {
+            like.isEnabled = false
+            thread {
+                try {
+                    val r = Net.postForm("/api/posts/${p.id}/like", emptyList())
+                    val j = JSONObject(r.body)
+                    runOnUiThread {
+                        p.liked = j.optBoolean("liked", p.liked)
+                        p.likes = j.optInt("count", p.likes)
+                        like.text = heart()
+                        like.setTextColor(if (p.liked) violet else muted)
+                        like.isEnabled = true
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        like.isEnabled = true
+                        toast("Não foi possível curtir.")
+                    }
+                }
+            }
+        }
+        actions.addView(like)
+        actions.addView(text("◌ ${p.comments}", 14f, muted).apply { setPadding(dp(2), dp(6), dp(2), dp(6)) })
+        c.addView(actions)
+        return c
     }
 
-    private fun testApi() {
-        thread {
-            val result = try {
-                val conn = (URL("$baseUrl/api/status").openConnection()
-                    as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 12000
-                    readTimeout = 12000
-                    setRequestProperty("Accept", "application/json")
-                }
+    private fun renderPosts(c: LinearLayout, posts: List<Post>, more: String?) {
+        for (p in posts) c.addView(postCard(p))
+        if (more != null) {
+            val b = pill("Carregar mais publicações") {}
+            b.setOnClickListener {
+                b.text = "Carregando…"
+                async({
+                    val d = Parse.doc(Net.get(more).body)
+                    Pair(Parse.posts(d), Parse.moreHref(d))
+                }, { r ->
+                    c.removeView(b)
+                    renderPosts(c, r.first, r.second)
+                }, { m -> b.text = "Falhou: $m. Toque para tentar de novo" })
+            }
+            c.addView(b)
+        }
+    }
 
-                try {
-                    val code = conn.responseCode
-                    val stream = if (code < 400) conn.inputStream
-                        else conn.errorStream
-                    val body = stream?.bufferedReader()?.use { it.readText() }
-                        ?: "(resposta vazia)"
-                    "HTTP $code\n\n$body"
-                } finally {
-                    conn.disconnect()
+    private fun showFeed() {
+        val c = screen("Início", "Seu feed", action = pill("＋ Publicar") { newPost() })
+        val st = text("Carregando publicações…", 14f, muted)
+        c.addView(st)
+        async({
+            val d = Parse.doc(Net.get("/home").body)
+            Pair(Parse.posts(d), Parse.moreHref(d))
+        }, { r ->
+            c.removeView(st)
+            if (r.first.isEmpty()) addLine(c, "Nenhuma publicação para mostrar ainda.", 14f, muted)
+            else renderPosts(c, r.first, r.second)
+        }, { m ->
+            st.text = "Falha ao carregar: $m"
+            st.setTextColor(errorColor)
+        })
+    }
+
+    // ---------- Publicar ----------
+    private fun newPost() {
+        pickedUri = null
+        val c = screen("Início", "Nova publicação", back = { showFeed() })
+        val box = fieldBox("O que está acontecendo?", true)
+        c.addView(box, params().apply { topMargin = dp(8); bottomMargin = dp(12) })
+        val label = text("Nenhuma imagem anexada", 12f, muted)
+        pickedLabel = label
+        c.addView(pill("Anexar imagem") {
+            val i = Intent(Intent.ACTION_GET_CONTENT)
+            i.type = "image/*"
+            startActivityForResult(Intent.createChooser(i, "Escolher imagem"), 77)
+        }, params())
+        c.addView(label, params().apply { topMargin = dp(6); bottomMargin = dp(16) })
+        val send = pill("Publicar") {}
+        send.setOnClickListener {
+            val txt = box.text.toString().trim()
+            val uri = pickedUri
+            if (txt.isEmpty() && uri == null) {
+                toast("Escreva algo ou anexe uma imagem.")
+                return@setOnClickListener
+            }
+            send.isEnabled = false
+            send.text = "Publicando…"
+            async({
+                var up: Upload? = null
+                if (uri != null) {
+                    val mime = contentResolver.getType(uri) ?: "image/jpeg"
+                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw Exception("Não consegui ler a imagem.")
+                    val ext = if (mime.contains("png")) "png" else if (mime.contains("webp")) "webp" else if (mime.contains("gif")) "gif" else "jpg"
+                    up = Upload("media", "imagem.$ext", mime, bytes)
+                }
+                val r = Net.postMultipart("/create", listOf(Pair("content", txt)), up)
+                if (r.path.endsWith("/create")) {
+                    throw Exception(Parse.flash(Parse.doc(r.body)) ?: "O servidor não aceitou a publicação.")
+                }
+                true
+            }, { _ ->
+                pickedUri = null
+                toast("Publicado.")
+                showFeed()
+            }, { m ->
+                send.isEnabled = true
+                send.text = "Publicar"
+                toast(m)
+            })
+        }
+        c.addView(send, params())
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 77 && resultCode == RESULT_OK && data?.data != null) {
+            pickedUri = data.data
+            pickedLabel?.text = "Imagem anexada"
+        }
+    }
+
+    // ---------- Buscar ----------
+    private fun personRow(p: Person): LinearLayout {
+        val c = card()
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(avatarView(p.avatar, p.name, 44))
+        val who = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), 0, dp(6), 0)
+        }
+        who.addView(text(p.name, 15f).apply { typeface = Typeface.DEFAULT_BOLD })
+        who.addView(text("@${p.username}", 12f, muted))
+        row.addView(who, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.setOnClickListener { showProfile(p.username) }
+        c.addView(row)
+        if (p.bio.isNotBlank()) c.addView(text(p.bio, 13f, muted).apply { setPadding(dp(2), dp(8), dp(2), dp(2)) })
+        val btns = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        if (p.showFollow && p.username != meUser) {
+            val f = pill(if (p.following) "Seguindo" else "Seguir") {}
+            f.setOnClickListener { toggleFollow(p, f) }
+            btns.addView(f, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(8) })
+        }
+        if (p.username != meUser) {
+            btns.addView(pill("Mensagem") { openChat(p.username, p.name) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        if (btns.childCount > 0) c.addView(btns)
+        return c
+    }
+
+    private fun toggleFollow(p: Person, btn: TextView) {
+        btn.isEnabled = false
+        thread {
+            try {
+                val r = Net.postForm("/api/users/${p.username}/follow", emptyList())
+                val j = JSONObject(r.body)
+                runOnUiThread {
+                    p.following = j.optBoolean("following", p.following)
+                    btn.text = if (p.following) "Seguindo" else "Seguir"
+                    btn.isEnabled = true
                 }
             } catch (e: Exception) {
-                "Erro: ${e.javaClass.simpleName}: ${e.message}"
-            }
-
-            runOnUiThread {
-                android.app.AlertDialog.Builder(this)
-                    .setTitle("Status da API")
-                    .setMessage(result)
-                    .setPositiveButton("OK", null)
-                    .show()
+                runOnUiThread {
+                    btn.isEnabled = true
+                    toast("Não foi possível atualizar.")
+                }
             }
         }
+    }
+
+    private fun loadCommunities(): List<Community> {
+        val out = LinkedHashMap<Int, Community>()
+        for (path in listOf("/home", "/discover")) {
+            try {
+                for (cm in Parse.communities(Parse.doc(Net.get(path).body))) out[cm.id] = cm
+            } catch (e: SessionExpired) {
+                throw e
+            } catch (e: Exception) {
+            }
+        }
+        return out.values.toList()
+    }
+
+    private fun showSearch(q: String) {
+        val c = screen("Buscar", "Buscar")
+        val input = fieldBox("Pessoas, publicações, salas e #tags")
+        input.setText(q)
+        input.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+        val go = pill("Buscar") { }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(8) })
+        row.addView(go)
+        c.addView(row, params().apply { bottomMargin = dp(14) })
+        val run = {
+            val t = input.text.toString().trim()
+            if (t.isNotEmpty()) showSearch(t)
+        }
+        go.setOnClickListener { run() }
+        input.setOnEditorActionListener { _, _, _ -> run(); true }
+
+        val st = text(if (q.isBlank()) "Carregando…" else "Buscando…", 14f, muted)
+        c.addView(st)
+        if (q.isBlank()) {
+            async({
+                val b = Parse.doc(Net.get("/buscar").body)
+                val people = try { Parse.discoverPeople(Parse.doc(Net.get("/discover").body)) } catch (e: SessionExpired) { throw e } catch (e: Exception) { emptyList() }
+                Pair(Parse.tags(b), people)
+            }, { r ->
+                c.removeView(st)
+                if (r.first.isNotEmpty()) {
+                    addLine(c, "Em alta", 18f)
+                    val flow = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                    for (tag in r.first) {
+                        flow.addView(pill(tag) { showSearch(tag) }, params().apply { bottomMargin = dp(8) })
+                    }
+                    c.addView(flow)
+                }
+                if (r.second.isNotEmpty()) {
+                    addLine(c, "Pessoas para conhecer", 18f)
+                    for (p in r.second) c.addView(personRow(p))
+                }
+                if (r.first.isEmpty() && r.second.isEmpty()) addLine(c, "Digite algo para buscar.", 14f, muted)
+            }, { m -> st.text = "Falha: $m"; st.setTextColor(errorColor) })
+        } else {
+            async({
+                val d = Parse.doc(Net.get("/buscar?q=" + enc(q)).body)
+                val needle = q.lowercase().removePrefix("#")
+                val rooms = try { Parse.rooms(Parse.doc(Net.get("/salas").body)).filter { it.name.lowercase().contains(needle) || it.desc.lowercase().contains(needle) } } catch (e: SessionExpired) { throw e } catch (e: Exception) { emptyList() }
+                val comms = try { loadCommunities().filter { it.name.lowercase().contains(needle) } } catch (e: SessionExpired) { throw e } catch (e: Exception) { emptyList() }
+                arrayOf<Any>(Parse.searchPeople(d), Parse.posts(d), rooms, comms)
+            }, { r ->
+                c.removeView(st)
+                @Suppress("UNCHECKED_CAST") val people = r[0] as List<Person>
+                @Suppress("UNCHECKED_CAST") val posts = r[1] as List<Post>
+                @Suppress("UNCHECKED_CAST") val rooms = r[2] as List<Room>
+                @Suppress("UNCHECKED_CAST") val comms = r[3] as List<Community>
+                if (people.isEmpty() && posts.isEmpty() && rooms.isEmpty() && comms.isEmpty()) {
+                    addLine(c, "Nada encontrado para \"$q\".", 14f, muted)
+                }
+                if (people.isNotEmpty()) {
+                    addLine(c, "Pessoas", 18f)
+                    for (p in people) c.addView(personRow(p))
+                }
+                if (rooms.isNotEmpty()) {
+                    addLine(c, "Salas", 18f)
+                    for (rm in rooms) c.addView(roomCard(rm))
+                }
+                if (comms.isNotEmpty()) {
+                    addLine(c, "Comunidades", 18f)
+                    for (cm in comms) c.addView(communityCard(cm))
+                }
+                if (posts.isNotEmpty()) {
+                    addLine(c, "Publicações", 18f)
+                    for (p in posts) c.addView(postCard(p))
+                }
+            }, { m -> st.text = "Falha: $m"; st.setTextColor(errorColor) })
+        }
+    }
+
+    // ---------- Salas e comunidades ----------
+    private fun roomCard(r: Room): LinearLayout {
+        val c = card()
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(avatarView(r.icon, r.name, 46))
+        val info = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+        }
+        info.addView(text(r.name, 16f).apply { typeface = Typeface.DEFAULT_BOLD })
+        info.addView(text(r.members, 12f, muted))
+        row.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        c.addView(row)
+        if (r.desc.isNotBlank()) c.addView(text(r.desc, 13f, muted).apply { setPadding(dp(2), dp(8), dp(2), dp(4)) })
+        c.addView(pill("Entrar na sala") { openRoom(r) }, params().apply { topMargin = dp(6) })
+        return c
+    }
+
+    private fun communityCard(cm: Community): LinearLayout {
+        val c = card()
+        c.addView(text("◈  ${cm.name}", 16f).apply { typeface = Typeface.DEFAULT_BOLD })
+        c.addView(pill("Ver comunidade") { openCommunity(cm) }, params().apply { topMargin = dp(8) })
+        return c
+    }
+
+    private fun showRooms() {
+        val c = screen("Salas", "Salas e comunidades")
+        val st = text("Carregando salas…", 14f, muted)
+        c.addView(st)
+        async({
+            val rooms = Parse.rooms(Parse.doc(Net.get("/salas").body))
+            val comms = loadCommunities()
+            Pair(rooms, comms)
+        }, { r ->
+            c.removeView(st)
+            addLine(c, "Salas públicas", 18f)
+            if (r.first.isEmpty()) addLine(c, "Nenhuma sala ainda.", 14f, muted)
+            for (rm in r.first) c.addView(roomCard(rm))
+            if (r.second.isNotEmpty()) {
+                addLine(c, "Comunidades", 18f)
+                for (cm in r.second) c.addView(communityCard(cm))
+            }
+        }, { m -> st.text = "Falha ao carregar: $m"; st.setTextColor(errorColor) })
+    }
+
+    private fun openCommunity(cm: Community) {
+        val c = screen("Salas", cm.name, back = { showRooms() })
+        val st = text("Carregando…", 14f, muted)
+        c.addView(st)
+        async({ Parse.doc(Net.get("/community/${cm.id}").body) }, { d ->
+            c.removeView(st)
+            val box = card()
+            addLine(box, d.selectFirst(".community-info h1")?.text() ?: cm.name, 22f)
+            val desc = d.selectFirst(".community-info p")?.text().orEmpty()
+            if (desc.isNotBlank()) addLine(box, desc, 14f, muted)
+            val members = d.selectFirst(".community-members")?.text().orEmpty()
+            if (members.isNotBlank()) addLine(box, members, 12f, muted)
+            val member = d.selectFirst(".community-status") != null
+            val btn = pill(if (member) "Você participa (toque para sair)" else "Participar") {}
+            btn.setOnClickListener {
+                btn.isEnabled = false
+                thread {
+                    try {
+                        val r = Net.postForm("/api/community/${cm.id}/join", emptyList())
+                        val j = JSONObject(r.body)
+                        runOnUiThread {
+                            btn.text = if (j.optBoolean("joined")) "Você participa (toque para sair)" else "Participar"
+                            btn.isEnabled = true
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            btn.isEnabled = true
+                            toast("Não foi possível concluir.")
+                        }
+                    }
+                }
+            }
+            box.addView(btn, params().apply { topMargin = dp(10) })
+            c.addView(box)
+        }, { m -> st.text = "Falha: $m"; st.setTextColor(errorColor) })
+    }
+
+    // ---------- bolhas de mensagem (salas e chat) ----------
+    private fun systemLine(t: String): View {
+        val v = text(t, 12f, muted)
+        v.gravity = Gravity.CENTER
+        v.setPadding(dp(4), dp(6), dp(4), dp(6))
+        return v
+    }
+
+    private fun bubble(who: String, body: String, mine: Boolean, media: String?, time: String = ""): View {
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = if (mine) Gravity.END else Gravity.START
+            layoutParams = params().apply { bottomMargin = dp(7) }
+        }
+        val b = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(13), dp(9), dp(13), dp(9))
+            background = rounded(if (mine) Color.rgb(78, 52, 150) else glass, 18f)
+        }
+        if (!mine && who.isNotBlank()) b.addView(text(who, 11f, violet).apply { typeface = Typeface.DEFAULT_BOLD })
+        if (body.isNotBlank()) b.addView(text(body, 15f))
+        if (media != null) b.addView(imageBlock(media))
+        if (time.isNotBlank()) b.addView(text(time, 10f, muted).apply { gravity = Gravity.END })
+        wrap.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            if (mine) leftMargin = dp(50) else rightMargin = dp(50)
+        })
+        return wrap
+    }
+
+    private fun footerBar(hintText: String, onSend: (EditText, TextView) -> Unit): LinearLayout {
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(4))
+            setBackgroundColor(ink)
+        }
+        val input = fieldBox(hintText)
+        input.maxLines = 3
+        val send = pill("Enviar") {}
+        send.setOnClickListener { onSend(input, send) }
+        bar.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(8) })
+        bar.addView(send)
+        return bar
+    }
+
+    private fun scrollDown() {
+        scrollRef.post { scrollRef.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    // ---------- Sala ----------
+    private fun roomMsgView(m: JSONObject): View {
+        val kind = m.optString("kind", "text")
+        val name = m.optString("name")
+        if (m.optBoolean("deleted")) return systemLine("Mensagem excluída")
+        val body = m.optString("body", "")
+        return when (kind) {
+            "text" -> bubble(name, body, m.optBoolean("mine"), if (m.isNull("media")) null else Net.abs(m.optString("media")), "")
+            "points" -> systemLine("$name doou $body ponto(s)")
+            "kcoin" -> { val p = body.split("|"); systemLine("$name doou ${p[0]} kcoin" + (if (p.size > 1) " para @${p[1]}" else "")) }
+            "crystal" -> { val p = body.split("|"); systemLine("$name doou ${p[0]} cristal(is)" + (if (p.size > 1) " para @${p[1]}" else "")) }
+            "gift" -> systemLine("$name enviou um presente: $body")
+            else -> systemLine("$name: $body")
+        }
+    }
+
+    private fun openRoom(r: Room) {
+        var lastId = 0L
+        var firstId = Long.MAX_VALUE
+        val footer = footerBar("Mensagem para a sala") { input, send ->
+            val t = input.text.toString().trim()
+            if (t.isEmpty()) return@footerBar
+            send.isEnabled = false
+            thread {
+                try {
+                    val resp = Net.postForm("/salas/${r.id}/enviar", listOf(Pair("body", t)))
+                    val j = JSONObject(resp.body)
+                    runOnUiThread {
+                        send.isEnabled = true
+                        if (j.has("error")) toast(j.optString("error")) else input.setText("")
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        send.isEnabled = true
+                        toast("Não foi possível enviar.")
+                    }
+                }
+            }
+        }
+        val c = screen("Salas", r.name, back = { showRooms() }, footer = footer)
+        val st = text("Entrando na sala…", 13f, muted)
+        c.addView(st)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        c.addView(list)
+
+        fun appendMsgs(arr: JSONArray, atTop: Boolean) {
+            var pos = 0
+            for (i in 0 until arr.length()) {
+                val m = arr.getJSONObject(i)
+                val id = m.optLong("id")
+                if (id > lastId) lastId = id
+                if (id < firstId) firstId = id
+                val v = roomMsgView(m)
+                if (atTop) {
+                    list.addView(v, pos)
+                    pos++
+                } else {
+                    list.addView(v)
+                }
+            }
+        }
+
+        async({
+            Net.get("/salas/${r.id}")   // abrir a sala já registra você como membro
+            JSONObject(Net.get("/salas/${r.id}/msgs", "application/json").body)
+        }, { j ->
+            c.removeView(st)
+            val arr = j.optJSONArray("messages") ?: JSONArray()
+            if (j.optBoolean("more")) {
+                val older = pill("Carregar mensagens anteriores") {}
+                older.setOnClickListener {
+                    val before = firstId
+                    async({ JSONObject(Net.get("/salas/${r.id}/msgs?before=$before", "application/json").body) }, { oj ->
+                        val oa = oj.optJSONArray("messages") ?: JSONArray()
+                        appendMsgs(oa, true)
+                        if (!oj.optBoolean("more")) c.removeView(older)
+                    })
+                }
+                c.addView(older, 0, params().apply { bottomMargin = dp(8) })
+            }
+            if (arr.length() == 0) list.addView(systemLine("Nenhuma mensagem ainda. Seja o primeiro."))
+            appendMsgs(arr, false)
+            scrollDown()
+            startPoll(4000) {
+                val sid = token
+                thread {
+                    try {
+                        val pj = JSONObject(Net.get("/salas/${r.id}/msgs?after=$lastId", "application/json").body)
+                        val pa = pj.optJSONArray("messages")
+                        if (pa != null && pa.length() > 0) {
+                            runOnUiThread {
+                                if (sid == token) {
+                                    appendMsgs(pa, false)
+                                    scrollDown()
+                                }
+                            }
+                        }
+                    } catch (e: SessionExpired) {
+                        runOnUiThread { sessionLost() }
+                    } catch (e: Exception) {
+                    }
+                }
+            }
+        }, { m -> st.text = "Falha ao abrir a sala: $m"; st.setTextColor(errorColor) })
+    }
+
+    // ---------- Chat ----------
+    private fun showChats() {
+        val c = screen("Chat", "Mensagens")
+        val st = text("Carregando conversas…", 14f, muted)
+        c.addView(st)
+        async({ Parse.convos(Parse.doc(Net.get("/chat").body)) }, { list ->
+            c.removeView(st)
+            if (list.isEmpty()) {
+                addLine(c, "Nenhuma conversa ainda. Busque uma pessoa e toque em Mensagem.", 14f, muted)
+            }
+            for (cv in list) {
+                val cardView = card()
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                row.addView(avatarView(cv.avatar, cv.name, 46))
+                val d = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), 0, dp(6), 0)
+                }
+                d.addView(text(cv.name, 16f).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                d.addView(text(cv.preview.ifBlank { "Nenhuma mensagem ainda." }, 12f, muted).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                row.addView(d, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                val side = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
+                side.addView(text(cv.time, 11f, muted))
+                if (cv.unread > 0) side.addView(text("${cv.unread}", 11f, violet).apply { typeface = Typeface.DEFAULT_BOLD })
+                row.addView(side)
+                cardView.addView(row)
+                cardView.setOnClickListener { openChat(cv.username, cv.name) }
+                c.addView(cardView)
+            }
+        }, { m -> st.text = "Falha ao carregar: $m"; st.setTextColor(errorColor) })
+    }
+
+    private fun chatText(m: JSONObject): Pair<String, String?> {
+        val raw = m.optString("content", "")
+        if (raw.startsWith("[[")) {
+            val end = raw.indexOf("]]")
+            val tag = if (end > 0) raw.substring(2, end) else ""
+            val rest = if (end > 0) raw.substring(end + 2).trim() else raw
+            val url = Net.abs(rest.takeIf { it.startsWith("/") || it.startsWith("http") })
+            return if (tag.contains("MEDIA") && url != null) Pair("", url) else Pair("[anexo]", null)
+        }
+        return Pair(raw, null)
+    }
+
+    private fun openChat(username: String, display: String) {
+        var convId = 0
+        var meId = 0L
+        var lastId = 0L
+        var list: LinearLayout? = null
+        val footer = footerBar("Mensagem") { input, send ->
+            val t = input.text.toString().trim()
+            if (t.isEmpty() || convId == 0) return@footerBar
+            send.isEnabled = false
+            thread {
+                try {
+                    val resp = Net.postForm("/api/chat/$convId/send", listOf(Pair("content", t)))
+                    val j = JSONObject(resp.body)
+                    runOnUiThread {
+                        send.isEnabled = true
+                        if (j.optBoolean("ok")) input.setText("") else toast(j.optString("error", "Não foi possível enviar."))
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        send.isEnabled = true
+                        toast("Não foi possível enviar.")
+                    }
+                }
+            }
+        }
+        val c = screen("Chat", display, back = { showChats() }, footer = footer)
+        val st = text("Abrindo conversa…", 13f, muted)
+        c.addView(st)
+
+        fun addMsgs(arr: JSONArray) {
+            val l = list ?: return
+            for (i in 0 until arr.length()) {
+                val m = arr.getJSONObject(i)
+                val id = m.optLong("id")
+                if (id <= lastId) continue
+                lastId = id
+                val (txt, media) = chatText(m)
+                l.addView(bubble("", txt, m.optLong("sender_id") == meId, media, ""))
+            }
+        }
+
+        async({
+            val d = Parse.doc(Net.get("/chat/" + enc(username)).body)
+            val box = d.selectFirst("[data-conversation-id]") ?: throw Exception("Conversa não encontrada.")
+            val id = box.attr("data-conversation-id").toIntOrNull() ?: throw Exception("Conversa inválida.")
+            val me = box.attr("data-current-user-id").toLongOrNull() ?: 0L
+            val j = JSONObject(Net.get("/api/chat/$id/messages?after=0", "application/json").body)
+            Triple(id, me, j)
+        }, { r ->
+            c.removeView(st)
+            convId = r.first
+            meId = r.second
+            val l = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            list = l
+            c.addView(l)
+            val arr = r.third.optJSONArray("messages") ?: JSONArray()
+            if (arr.length() == 0) l.addView(systemLine("Nenhuma mensagem ainda. Diga oi."))
+            else addMsgs(arr)
+            scrollDown()
+            startPoll(4000) {
+                val sid = token
+                thread {
+                    try {
+                        val pj = JSONObject(Net.get("/api/chat/$convId/messages?after=$lastId", "application/json").body)
+                        val pa = pj.optJSONArray("messages")
+                        if (pa != null && pa.length() > 0) {
+                            runOnUiThread {
+                                if (sid == token) {
+                                    addMsgs(pa)
+                                    scrollDown()
+                                }
+                            }
+                        }
+                    } catch (e: SessionExpired) {
+                        runOnUiThread { sessionLost() }
+                    } catch (e: Exception) {
+                    }
+                }
+            }
+        }, { m -> st.text = "Falha ao abrir: $m"; st.setTextColor(errorColor) })
+    }
+
+    // ---------- Perfil ----------
+    private fun showProfile(username: String?) {
+        val mine = username == null || username == meUser
+        val backFn: (() -> Unit)? = if (mine) null else fun() { showFeed() }
+        val c = screen("Perfil", if (mine) "Meu perfil" else "@$username", back = backFn)
+        val st = text("Carregando perfil…", 14f, muted)
+        c.addView(st)
+        async({
+            var u = username ?: meUser
+            if (u == null) {
+                u = Parse.meUsername(Parse.doc(Net.get("/settings/profile").body)) ?: throw Exception("Não consegui identificar sua conta.")
+                meUser = u
+            }
+            val d = Parse.doc(Net.get("/u/" + enc(u)).body)
+            Parse.profile(d, u, u == meUser)
+        }, { p ->
+            c.removeView(st)
+            val head = card().apply { background = rounded(Color.rgb(36, 27, 58), 26f) }
+            val r1 = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            r1.addView(avatarView(p.avatar, p.name, 64))
+            val nm = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), 0, 0, 0)
+            }
+            nm.addView(text(p.name, 21f).apply { typeface = Typeface.DEFAULT_BOLD })
+            nm.addView(text("@${p.username}", 13f, muted))
+            r1.addView(nm)
+            head.addView(r1)
+            if (p.bio.isNotBlank()) head.addView(text(p.bio, 14f).apply { setPadding(dp(2), dp(12), dp(2), dp(4)) })
+            if (p.stats.isNotEmpty()) {
+                val stats = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, dp(10), 0, 0)
+                }
+                for (s in p.stats.take(4)) {
+                    val cell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+                    cell.addView(text(s.second, 16f).apply { typeface = Typeface.DEFAULT_BOLD })
+                    cell.addView(text(s.first, 10f, muted))
+                    stats.addView(cell, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                }
+                head.addView(stats)
+            }
+            c.addView(head)
+            if (p.isMe) {
+                c.addView(pill("Editar perfil") { editProfile() }, params().apply { bottomMargin = dp(8) })
+                c.addView(pill("Sair da conta") { logout() }, params().apply { bottomMargin = dp(14) })
+            } else {
+                val person = Person(p.name, p.username, p.avatar, "", p.following, true)
+                val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                val f = pill(if (p.following) "Seguindo" else "Seguir") {}
+                f.setOnClickListener { toggleFollow(person, f) }
+                btns.addView(f, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(8) })
+                btns.addView(pill("Mensagem") { openChat(p.username, p.name) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                c.addView(btns, params().apply { bottomMargin = dp(14) })
+            }
+            addLine(c, "Publicações", 18f)
+            if (p.posts.isEmpty()) addLine(c, "Nenhuma publicação ainda.", 14f, muted)
+            for (po in p.posts) c.addView(postCard(po))
+        }, { m -> st.text = "Falha ao carregar: $m"; st.setTextColor(errorColor) })
+    }
+
+    private fun editProfile() {
+        val c = screen("Perfil", "Editar perfil", back = { showProfile(null) })
+        val st = text("Carregando…", 14f, muted)
+        c.addView(st)
+        async({
+            val d = Parse.doc(Net.get("/settings/profile").body)
+            Parse.formFields(d, "settings/profile")
+        }, { fields ->
+            c.removeView(st)
+            if (fields.isEmpty()) {
+                addLine(c, "Não encontrei o formulário de edição.", 14f, errorColor)
+                return@async
+            }
+            val map = LinkedHashMap<String, String>()
+            val order = ArrayList<Pair<String, String>>()
+            for (f in fields) {
+                map[f.first] = f.second
+                order.add(f)
+            }
+            addLine(c, "Nome", 13f, muted)
+            val name = fieldBox("Nome")
+            name.setText(map["name"] ?: "")
+            c.addView(name, params().apply { bottomMargin = dp(10) })
+            addLine(c, "Status (dura 24 h)", 13f, muted)
+            val status = fieldBox("Status")
+            status.setText(map["status"] ?: "")
+            c.addView(status, params().apply { bottomMargin = dp(10) })
+            addLine(c, "Bio", 13f, muted)
+            val bio = fieldBox("Bio", true)
+            bio.setText(map["bio"] ?: "")
+            c.addView(bio, params().apply { bottomMargin = dp(14) })
+            val save = pill("Salvar alterações") {}
+            save.setOnClickListener {
+                val n = name.text.toString().trim()
+                if (n.isEmpty()) {
+                    toast("O nome não pode ficar vazio.")
+                    return@setOnClickListener
+                }
+                save.isEnabled = false
+                save.text = "Salvando…"
+                async({
+                    val out = ArrayList<Pair<String, String>>()
+                    var hadName = false
+                    var hadStatus = false
+                    var hadBio = false
+                    for (f in order) {
+                        when (f.first) {
+                            "name" -> { out.add(Pair("name", n)); hadName = true }
+                            "status" -> { out.add(Pair("status", status.text.toString().trim())); hadStatus = true }
+                            "bio" -> { out.add(Pair("bio", bio.text.toString().trim())); hadBio = true }
+                            else -> out.add(f)
+                        }
+                    }
+                    if (!hadName) out.add(Pair("name", n))
+                    if (!hadStatus) out.add(Pair("status", status.text.toString().trim()))
+                    if (!hadBio) out.add(Pair("bio", bio.text.toString().trim()))
+                    val r = Net.postForm("/settings/profile", out, "text/html")
+                    if (r.code >= 400) throw Exception("HTTP ${r.code}")
+                    Parse.flash(Parse.doc(r.body)) ?: "Perfil atualizado."
+                }, { msg ->
+                    toast(msg)
+                    showProfile(null)
+                }, { m ->
+                    save.isEnabled = true
+                    save.text = "Salvar alterações"
+                    toast(m)
+                })
+            }
+            c.addView(save, params())
+        }, { m -> st.text = "Falha ao carregar: $m"; st.setTextColor(errorColor) })
     }
 }

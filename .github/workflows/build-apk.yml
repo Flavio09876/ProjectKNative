@@ -6,7 +6,7 @@ on:
     branches: [main, master]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -35,3 +35,12 @@ jobs:
           name: projectk-native-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Publish APK in a release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk ProjectK-debug.apk
+          gh release delete apk-latest --cleanup-tag -y || true
+          gh release create apk-latest ProjectK-debug.apk --title "APK mais recente" --notes "Build do commit ${{ github.sha }}" --prerelease

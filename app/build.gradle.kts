@@ -27,3 +27,7 @@ kotlin {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
+
+dependencies {
+    implementation("org.jsoup:jsoup:1.18.1")
+}
