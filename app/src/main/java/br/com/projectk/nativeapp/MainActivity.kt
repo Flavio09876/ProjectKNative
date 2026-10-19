@@ -326,61 +326,29 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun loadRealFeed() {
-        Thread {
+
+    private fun loadRealFeed(onResult: (List<String>, String?) -> Unit) {
+        thread {
             try {
                 val html = fetchPage("/home")
                 val extracted = Regex(
-                    """(?is)<article\\b[^>]*>(.*?)</article>"""
+                    """(?is)<article\b[^>]*>(.*?)</article>"""
                 ).findAll(html).map { match ->
                     Html.fromHtml(
                         match.groupValues[1]
-                            .replace(Regex("(?is)<(script|style)\\b.*?</\\1>"), "")
-                            .replace(Regex("(?is)<img\\b[^>]*>"), " [imagem] "),
+                            .replace(Regex("(?is)<(script|style)\b.*?</\\1>"), "")
+                            .replace(Regex("(?is)<img\b[^>]*>"), " [imagem] "),
                         Html.FROM_HTML_MODE_COMPACT
-                    ).toString().replace(Regex("\\\\s+"), " ").trim()
+                    ).toString().replace(Regex("\\s+"), " ").trim()
                 }.filter { it.isNotBlank() && it.length > 8 }.toList()
 
-                runOnUiThread {
-                    renderTab("Início", "")
-                    if (extracted.isEmpty()) {
-                        Toast.makeText(
-                            this,
-                            "O feed foi recebido, mas o formato HTML não correspondeu ao extrator. Nenhum post fictício foi exibido.",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    } else {
-                        val box = LinearLayout(this).apply {
-                            orientation = LinearLayout.VERTICAL
-                            setPadding(dp(16), dp(8), dp(16), dp(20))
-                            setBackgroundColor(bg)
-                        }
-                        box.addView(label("Publicações reais", 21f), params())
-                        extracted.forEach { text ->
-                            val card = LinearLayout(this).apply {
-                                orientation = LinearLayout.VERTICAL
-                                setPadding(dp(14), dp(14), dp(14), dp(14))
-                                setBackgroundColor(panel)
-                            }
-                            card.addView(label(text, 14f), params())
-                            val lp = params().apply { bottomMargin = dp(12) }
-                            box.addView(card, lp)
-                        }
-                        root.removeAllViews()
-                        root.addView(box, params())
-                    }
-                }
+                runOnUiThread { onResult(extracted, null) }
             } catch (e: Exception) {
                 runOnUiThread {
-                    renderTab("Início", "")
-                    Toast.makeText(
-                        this,
-                        "Falha ao carregar feed real: ${e.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    onResult(emptyList(), e.message ?: "erro desconhecido")
                 }
             }
-        }.start()
+        }
     }
 
     private fun showHome(message: String) {
@@ -443,17 +411,27 @@ class MainActivity : Activity() {
                 addLine(content, "Seu feed", 21f)
                 addLine(content, "O que está acontecendo por aí", 12f, muted)
 
-                addLine(content, "Carregando publicações reais…", 16f)
-                loadRealFeed()
-                    addLine(c, post.second, 16f)
-                    View(this).apply {
-                        setBackgroundColor(Color.rgb(48, 49, 64))
-                        c.addView(this, LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, dp(1)
-                        ).apply { topMargin = dp(8); bottomMargin = dp(8) })
+                val feedStatus = text("Carregando publicações reais…", 14f, muted)
+                content.addView(feedStatus, params())
+
+                loadRealFeed { posts, error ->
+                    content.removeView(feedStatus)
+
+                    if (posts.isEmpty()) {
+                        val detail = if (error != null) {
+                            "Falha ao carregar: $error"
+                        } else {
+                            "O HTML chegou, mas não encontrei blocos article. Precisamos ajustar o extrator."
+                        }
+                        addLine(content, detail, 13f, muted)
+                    } else {
+                        addLine(content, "Publicações reais", 18f, violet)
+                        posts.forEach { postText ->
+                            val postCard = card()
+                            addLine(postCard, postText, 14f)
+                            content.addView(postCard)
+                        }
                     }
-                    addLine(c, post.third, 12f, muted)
-                    content.addView(c)
                 }
                 if (message.isNotBlank()) addLine(content, message, 11f, muted)
             }
