@@ -263,7 +263,7 @@ class MainActivity : Activity() {
     private fun rounded(color: Int, radius: Float = 22f): android.graphics.drawable.GradientDrawable {
         return android.graphics.drawable.GradientDrawable().apply {
             setColor(color)
-            cornerRadius = dp(radius)
+            cornerRadius = radius * resources.displayMetrics.density
             setStroke(dp(1), Color.argb(45, 190, 180, 255))
         }
     }
@@ -389,7 +389,7 @@ class MainActivity : Activity() {
                     setHintTextColor(muted)
                     setTextColor(Color.WHITE)
                     textSize = 15f
-                    singleLine = true
+                    setSingleLine(true)
                     setPadding(dp(15), dp(13), dp(15), dp(13))
                     background = rounded(glass)
                 }
