@@ -2,6 +2,7 @@ package br.com.projectk.nativeapp
 
 import android.app.Activity
 import android.os.Bundle
+import android.text.Html
 import android.graphics.Color
 import android.view.Gravity
 import android.view.View
@@ -301,6 +302,87 @@ class MainActivity : Activity() {
         }
     }
 
+
+    private fun fetchPage(path: String): String {
+        val conn = (URL("$baseUrl$path").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15000
+            readTimeout = 20000
+            instanceFollowRedirects = true
+            setRequestProperty("Accept", "text/html")
+            setRequestProperty("User-Agent", "ProjectK-Android/0.2")
+        }
+        return try {
+            val code = conn.responseCode
+            val stream = if (code < 400) conn.inputStream else conn.errorStream
+            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (code >= 400) throw Exception("HTTP $code")
+            if (conn.url.path.trimEnd('/').endsWith("/login")) {
+                throw Exception("Sessão expirada. Entre novamente.")
+            }
+            body
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun loadRealFeed() {
+        Thread {
+            try {
+                val html = fetchPage("/home")
+                val extracted = Regex(
+                    """(?is)<article\\b[^>]*>(.*?)</article>"""
+                ).findAll(html).map { match ->
+                    Html.fromHtml(
+                        match.groupValues[1]
+                            .replace(Regex("(?is)<(script|style)\\b.*?</\\1>"), "")
+                            .replace(Regex("(?is)<img\\b[^>]*>"), " [imagem] "),
+                        Html.FROM_HTML_MODE_COMPACT
+                    ).toString().replace(Regex("\\\\s+"), " ").trim()
+                }.filter { it.isNotBlank() && it.length > 8 }.toList()
+
+                runOnUiThread {
+                    renderTab("Início", "")
+                    if (extracted.isEmpty()) {
+                        Toast.makeText(
+                            this,
+                            "O feed foi recebido, mas o formato HTML não correspondeu ao extrator. Nenhum post fictício foi exibido.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        val box = LinearLayout(this).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(dp(16), dp(8), dp(16), dp(20))
+                            setBackgroundColor(bg)
+                        }
+                        box.addView(label("Publicações reais", 21f), params())
+                        extracted.forEach { text ->
+                            val card = LinearLayout(this).apply {
+                                orientation = LinearLayout.VERTICAL
+                                setPadding(dp(14), dp(14), dp(14), dp(14))
+                                setBackgroundColor(panel)
+                            }
+                            card.addView(label(text, 14f), params())
+                            val lp = params().apply { bottomMargin = dp(12) }
+                            box.addView(card, lp)
+                        }
+                        root.removeAllViews()
+                        root.addView(box, params())
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    renderTab("Início", "")
+                    Toast.makeText(
+                        this,
+                        "Falha ao carregar feed real: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }.start()
+    }
+
     private fun showHome(message: String) {
         renderTab("Início", message)
     }
@@ -361,14 +443,8 @@ class MainActivity : Activity() {
                 addLine(content, "Seu feed", 21f)
                 addLine(content, "O que está acontecendo por aí", 12f, muted)
 
-                val posts = listOf(
-                    Triple("noct", "Hoje o céu parece uma tela de carregamento infinita.", "♡ 24     ◯ 8 comentários"),
-                    Triple("luna.exe", "Alguém mais gosta daquela sensação de explorar lugares vazios de madrugada?", "♡ 18     ◯ 5 comentários"),
-                    Triple("void", "Pequenas coisas também merecem ser compartilhadas.", "♡ 31     ◯ 12 comentários")
-                )
-                posts.forEachIndexed { i, post ->
-                    val c = card()
-                    addLine(c, "◉   ${post.first}     ·     ${i + 2} h", 13f, violet)
+                addLine(content, "Carregando publicações reais…", 16f)
+                loadRealFeed()
                     addLine(c, post.second, 16f)
                     View(this).apply {
                         setBackgroundColor(Color.rgb(48, 49, 64))
