@@ -1731,7 +1731,7 @@ class MainActivity : Activity() {
 
     private fun showSettings() {
         val c = screen("Mais", "Configurações", back = { showMore() })
-        fun group(vararg items: Triple<String, Int, () -> Unit>) {
+        fun group(vararg items: Triple<String, Pair<Int, Int>, () -> Unit>) {
             val g = LinearLayout(this)
             g.orientation = LinearLayout.VERTICAL
             g.background = GradientDrawable().apply { setColor(Color.rgb(24, 12, 16)); cornerRadius = dp(20).toFloat() }
@@ -1740,8 +1740,9 @@ class MainActivity : Activity() {
                 row.orientation = LinearLayout.HORIZONTAL
                 row.gravity = Gravity.CENTER_VERTICAL
                 row.setPadding(dp(14), dp(14), dp(14), dp(14))
-                val tile = View(this)
-                tile.background = GradientDrawable().apply { setColor(it.second); cornerRadius = dp(9).toFloat() }
+                val tile = FrameLayout(this)
+                tile.background = GradientDrawable().apply { setColor(it.second.second); cornerRadius = dp(9).toFloat() }
+                tile.addView(icon(it.second.first, Color.WHITE, 18), FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
                 row.addView(tile, LinearLayout.LayoutParams(dp(30), dp(30)))
                 row.addView(text(it.first, 16f).apply { setPadding(dp(14), 0, 0, 0) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 row.addView(text("›", 22f, muted))
@@ -1753,19 +1754,19 @@ class MainActivity : Activity() {
         }
         val back = { showSettings() }
         group(
-            Triple("Editar perfil", Color.rgb(225, 29, 46)) { editProfile() },
-            Triple("Conta (e-mail e senha)", Color.rgb(66, 133, 244)) { showWebPage("Conta", "/settings", "conta", back) },
-            Triple("Privacidade", Color.rgb(52, 168, 83)) { showWebPage("Privacidade", "/settings", "privacidade", back) }
+            Triple("Editar perfil", Pair(R.drawable.ic_user, Color.rgb(225, 29, 46))) { editProfile() },
+            Triple("Conta (e-mail e senha)", Pair(R.drawable.ic_mail, Color.rgb(66, 133, 244))) { showWebPage("Conta", "/settings", "conta", back) },
+            Triple("Privacidade", Pair(R.drawable.ic_lock, Color.rgb(52, 168, 83))) { showWebPage("Privacidade", "/settings", "privacidade", back) }
         )
         group(
-            Triple("Discord", Color.rgb(88, 101, 242)) { showWebPage("Discord", "/settings", "discord", back) },
-            Triple("Avisos no Discord", Color.rgb(88, 101, 242)) { showWebPage("Avisos", "/settings", "discord-avisos", back) },
-            Triple("Usuários bloqueados", Color.rgb(110, 110, 120)) { showWebPage("Bloqueados", "/settings", "Usuários bloqueados", back) }
+            Triple("Discord", Pair(R.drawable.ic_chat, Color.rgb(88, 101, 242))) { showWebPage("Discord", "/settings", "discord", back) },
+            Triple("Avisos no Discord", Pair(R.drawable.ic_bell, Color.rgb(88, 101, 242))) { showWebPage("Avisos", "/settings", "discord-avisos", back) },
+            Triple("Usuários bloqueados", Pair(R.drawable.ic_block, Color.rgb(110, 110, 120))) { showWebPage("Bloqueados", "/settings", "Usuários bloqueados", back) }
         )
         group(
-            Triple("Enviar feedback", Color.rgb(245, 124, 0)) { showWebPage("Feedback", "/settings", "feedback", back) },
-            Triple("Ajuda e informações", Color.rgb(212, 160, 0)) { showWebPage("Ajuda", "/settings", "ajuda", back) },
-            Triple("Excluir conta", Color.rgb(160, 20, 30)) { showWebPage("Excluir conta", "/settings", "Excluir conta", back) }
+            Triple("Enviar feedback", Pair(R.drawable.ic_feedback, Color.rgb(245, 124, 0))) { showWebPage("Feedback", "/settings", "feedback", back) },
+            Triple("Ajuda e informações", Pair(R.drawable.ic_info, Color.rgb(212, 160, 0))) { showWebPage("Ajuda", "/settings", "ajuda", back) },
+            Triple("Excluir conta", Pair(R.drawable.ic_trash, Color.rgb(160, 20, 30))) { showWebPage("Excluir conta", "/settings", "Excluir conta", back) }
         )
     }
 
