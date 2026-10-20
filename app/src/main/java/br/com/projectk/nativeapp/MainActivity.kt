@@ -1511,6 +1511,58 @@ class MainActivity : Activity() {
                 u = Parse.meUsername(Parse.doc(Net.get("/settings/profile").body)) ?: throw Exception("Não consegui identificar sua conta.")
                 meUser = u
             }
+            u
+        }, { u ->
+            c.removeView(st)
+            openWebProfile(c, u)
+        }, { m -> st.text = "Falha ao abrir: $m"; st.setTextColor(errorColor) })
+    }
+
+    private fun openWebProfile(c: LinearLayout, u: String) {
+        try {
+            val cm = android.webkit.CookieManager.getInstance()
+            cm.setAcceptCookie(true)
+            (java.net.CookieHandler.getDefault() as? java.net.CookieManager)?.cookieStore?.cookies?.forEach {
+                cm.setCookie(Net.BASE, it.name + "=" + it.value + "; Path=/")
+            }
+            cm.flush()
+        } catch (e: Throwable) {}
+        val wv = android.webkit.WebView(this)
+        wv.setBackgroundColor(Color.rgb(7, 5, 10))
+        wv.settings.javaScriptEnabled = true
+        wv.settings.domStorageEnabled = true
+        wv.setOnTouchListener { v, _ -> v.parent.requestDisallowInterceptTouchEvent(true); false }
+        val css = "header.topbar,.k-side,nav.top-navigation,footer.mobile-navigation,.k-sheet,#k-more-btn{display:none!important}" +
+            "html,body{background:#07050a!important}.main-content{margin:0!important;padding:8px!important;max-width:100%!important;width:100%!important}" +
+            "body{padding:0!important}"
+        val js = "(function(){var s=document.createElement('style');s.textContent=" + org.json.JSONObject.quote(css) + ";document.head.appendChild(s);})()"
+        wv.webViewClient = object : android.webkit.WebViewClient() {
+            override fun onPageStarted(v: android.webkit.WebView, url: String?, f: android.graphics.Bitmap?) { v.evaluateJavascript(js, null) }
+            override fun onPageFinished(v: android.webkit.WebView, url: String?) { v.evaluateJavascript(js, null) }
+            override fun shouldOverrideUrlLoading(v: android.webkit.WebView, r: android.webkit.WebResourceRequest): Boolean {
+                val p = r.url.path ?: ""
+                if (p.startsWith("/u/")) return false
+                if (p.startsWith("/settings/profile")) { editProfile(); return true }
+                return true
+            }
+        }
+        val h = resources.displayMetrics.heightPixels - dp(230)
+        c.addView(wv, LinearLayout.LayoutParams(-1, h))
+        wv.loadUrl(Net.BASE + "/u/" + enc(u))
+    }
+
+    private fun showProfileNative(username: String?) {
+        val mine = username == null || username == meUser
+        val backFn: (() -> Unit)? = if (mine) null else fun() { showFeed() }
+        val c = screen("Mais", if (mine) "Meu perfil" else "@$username", back = backFn)
+        val st = skeleton()
+        c.addView(st)
+        async({
+            var u = username ?: meUser
+            if (u == null) {
+                u = Parse.meUsername(Parse.doc(Net.get("/settings/profile").body)) ?: throw Exception("Não consegui identificar sua conta.")
+                meUser = u
+            }
             try { Frames.ensure() } catch (e: SessionExpired) { throw e } catch (e: Exception) { }
             val d = Parse.doc(Net.get("/u/" + enc(u)).body)
             Parse.profile(d, u, u == meUser)
