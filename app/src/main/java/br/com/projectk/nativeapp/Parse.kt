@@ -34,6 +34,10 @@ data class Profile(
 )
 
 object Parse {
+    @Volatile var avatarHtml: String? = null
+    @Volatile var cssLinks: List<String> = emptyList()
+    @Volatile var styles: String = ""
+
     fun doc(html: String): Document = Jsoup.parse(html, Net.BASE).also { Frames.feed(it); Frames.addCss(it) }
 
     private fun src(e: Element?): String? {
@@ -254,6 +258,9 @@ object Parse {
         val btn = d.selectFirst("[data-following]")
         val coverStyle = d.selectFirst(".z-profile-cover")?.attr("style").orEmpty()
         val cover = Regex("""url\(['"]?([^'")]+)['"]?\)""").find(coverStyle)?.groupValues?.get(1)
+        avatarHtml = d.selectFirst(".z-profile-avatar-wrap")?.outerHtml()
+        cssLinks = d.select("link[rel=stylesheet]").map { it.absUrl("href") }.filter { it.isNotBlank() }
+        styles = d.select("style").joinToString("") { it.data() }
         val badges = ArrayList<String>()
         for (b in d.select(".k-badgebar .kbtn svg")) {
             var x = b.outerHtml()
