@@ -1529,7 +1529,8 @@ class MainActivity : Activity() {
             val r1 = LinearLayout(this)
             r1.orientation = LinearLayout.HORIZONTAL
             r1.gravity = Gravity.CENTER_VERTICAL
-            r1.addView(avatarView(p.avatar, p.name, 76, p.frame))
+            val live = if (p.frame != null || Frames.profileHtml?.contains("k-frame") == true) Frames.liveView(this, 110) else null
+            if (live != null) r1.addView(live, LinearLayout.LayoutParams(dp(110), dp(110))) else r1.addView(avatarView(p.avatar, p.name, 76, p.frame))
             val nm = LinearLayout(this)
             nm.orientation = LinearLayout.VERTICAL
             nm.setPadding(dp(14), 0, 0, 0)

@@ -93,8 +93,14 @@ object Frames {
 
     fun init(a: android.app.Activity) { act = a }
 
+    @Volatile var profileHtml: String? = null
+    @Volatile var links: List<String> = listOf("/static/css/k-ui.css")
+
     fun addCss(d: org.jsoup.nodes.Document) {
         try {
+            val ls = d.select("link[rel=stylesheet]").map { it.attr("href") }.filter { it.startsWith("/static/") || it.startsWith("http") }
+            if (ls.isNotEmpty()) links = ls
+            profileHtml = d.selectFirst(".z-profile-avatar-wrap")?.outerHtml()
             val css = d.select("style[data-sp]").joinToString("") { it.data() }
             if (css.isNotBlank()) synchronized(custom) { if (custom.size < 40) custom.add(css) }
         } catch (e: Throwable) {}
@@ -180,5 +186,20 @@ object Frames {
         } catch (e: Throwable) {
             finish(key, null)
         }
+    }
+
+    fun liveView(a: android.app.Activity, sizeDp: Int): android.webkit.WebView? {
+        val inner = profileHtml ?: return null
+        val wv = android.webkit.WebView(a)
+        wv.setBackgroundColor(0)
+        wv.isVerticalScrollBarEnabled = false
+        wv.isHorizontalScrollBarEnabled = false
+        val css = synchronized(custom) { custom.joinToString("") }
+        val lk = links.joinToString("") { "<link rel='stylesheet' href='" + it + "'>" }
+        val html = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>" + lk +
+            "<style>" + css + "html,body{margin:0;height:100%;background:transparent!important;overflow:hidden}" +
+            "body{display:grid;place-items:center}.z-profile-avatar-wrap{margin:0!important;width:" + (sizeDp * 0.85f).toInt() + "px!important;height:" + (sizeDp * 0.85f).toInt() + "px!important}</style></head><body>" + inner + "</body></html>"
+        wv.loadDataWithBaseURL(Net.BASE + "/", html, "text/html", "utf-8", null)
+        return wv
     }
 }
