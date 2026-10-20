@@ -1531,6 +1531,7 @@ class MainActivity : Activity() {
         val wv = android.webkit.WebView(this)
         wv.setBackgroundColor(Color.rgb(7, 5, 10))
         wv.settings.javaScriptEnabled = true
+        wv.settings.userAgentString = wv.settings.userAgentString + " ProjectKApp"
         wv.settings.domStorageEnabled = true
         wv.overScrollMode = View.OVER_SCROLL_NEVER
         wv.isVerticalScrollBarEnabled = false
@@ -1575,6 +1576,7 @@ class MainActivity : Activity() {
         val wv = android.webkit.WebView(this)
         wv.setBackgroundColor(Color.rgb(7, 5, 10))
         wv.settings.javaScriptEnabled = true
+        wv.settings.userAgentString = wv.settings.userAgentString + " ProjectKApp"
         wv.settings.domStorageEnabled = true
         wv.settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
         wv.overScrollMode = View.OVER_SCROLL_NEVER
