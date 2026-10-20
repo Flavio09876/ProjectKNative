@@ -1672,7 +1672,7 @@ class MainActivity : Activity() {
 
     private fun openWebProfile(c: LinearLayout, u: String) = openWeb(c, "/u/" + enc(u), "/u/")
 
-    private fun openWeb(c: LinearLayout, path: String, stayPrefix: String) {
+    private fun openWeb(c: LinearLayout, path: String, stayPrefix: String, only: String? = null) {
         try {
             val cm = android.webkit.CookieManager.getInstance()
             cm.setAcceptCookie(true)
@@ -1695,7 +1695,8 @@ class MainActivity : Activity() {
             "*{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}" +
             "body::before,body::after,.aurora,canvas.aurora,#aurora{display:none!important}" +
             ".z-profile-cover,.z-profile-cover *{animation:none!important}"
-        val js = "(function(){if(document.getElementById('kapp'))return;var s=document.createElement('style');s.id='kapp';s.textContent=" + org.json.JSONObject.quote(css) + ";document.head.appendChild(s);})()"
+        val onlyJs = if (only == null) "" else "document.querySelectorAll('section.k-card').forEach(function(s){var h=s.querySelector('h2');var ok=s.id==" + org.json.JSONObject.quote(only) + "||(h&&h.textContent.trim()==" + org.json.JSONObject.quote(only) + ");s.style.display=ok?'':'none';});document.querySelectorAll('.main-content nav').forEach(function(n){n.style.display='none'});"
+        val js = "(function(){" + onlyJs + "if(document.getElementById('kapp'))return;var s=document.createElement('style');s.id='kapp';s.textContent=" + org.json.JSONObject.quote(css) + ";document.head.appendChild(s);})()"
         wv.webChromeClient = object : android.webkit.WebChromeClient() {
             override fun onShowFileChooser(v: android.webkit.WebView, cb: android.webkit.ValueCallback<Array<android.net.Uri>>, p: FileChooserParams): Boolean {
                 fileCb?.onReceiveValue(null)
@@ -1723,9 +1724,49 @@ class MainActivity : Activity() {
         wv.loadUrl(Net.BASE + path)
     }
 
-    private fun showWebPage(title: String, path: String) {
-        val c = screen("Mais", title, back = { showMore() })
-        openWeb(c, path, "/")
+    private fun showWebPage(title: String, path: String, only: String? = null, back: () -> Unit = { showMore() }) {
+        val c = screen("Mais", title, back = back)
+        openWeb(c, path, "/", only)
+    }
+
+    private fun showSettings() {
+        val c = screen("Mais", "Configurações", back = { showMore() })
+        fun group(vararg items: Triple<String, Int, () -> Unit>) {
+            val g = LinearLayout(this)
+            g.orientation = LinearLayout.VERTICAL
+            g.background = GradientDrawable().apply { setColor(Color.rgb(24, 12, 16)); cornerRadius = dp(20).toFloat() }
+            items.forEachIndexed { i, it ->
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                row.gravity = Gravity.CENTER_VERTICAL
+                row.setPadding(dp(14), dp(14), dp(14), dp(14))
+                val tile = View(this)
+                tile.background = GradientDrawable().apply { setColor(it.second); cornerRadius = dp(9).toFloat() }
+                row.addView(tile, LinearLayout.LayoutParams(dp(30), dp(30)))
+                row.addView(text(it.first, 16f).apply { setPadding(dp(14), 0, 0, 0) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                row.addView(text("›", 22f, muted))
+                row.setOnClickListener { _ -> it.third() }
+                g.addView(row)
+                if (i < items.size - 1) g.addView(View(this).apply { setBackgroundColor(Color.argb(40, 255, 255, 255)) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(58) })
+            }
+            c.addView(g, params().apply { bottomMargin = dp(14) })
+        }
+        val back = { showSettings() }
+        group(
+            Triple("Editar perfil", Color.rgb(225, 29, 46)) { editProfile() },
+            Triple("Conta (e-mail e senha)", Color.rgb(66, 133, 244)) { showWebPage("Conta", "/settings", "conta", back) },
+            Triple("Privacidade", Color.rgb(52, 168, 83)) { showWebPage("Privacidade", "/settings", "privacidade", back) }
+        )
+        group(
+            Triple("Discord", Color.rgb(88, 101, 242)) { showWebPage("Discord", "/settings", "discord", back) },
+            Triple("Avisos no Discord", Color.rgb(88, 101, 242)) { showWebPage("Avisos", "/settings", "discord-avisos", back) },
+            Triple("Usuários bloqueados", Color.rgb(110, 110, 120)) { showWebPage("Bloqueados", "/settings", "Usuários bloqueados", back) }
+        )
+        group(
+            Triple("Enviar feedback", Color.rgb(245, 124, 0)) { showWebPage("Feedback", "/settings", "feedback", back) },
+            Triple("Ajuda e informações", Color.rgb(212, 160, 0)) { showWebPage("Ajuda", "/settings", "ajuda", back) },
+            Triple("Excluir conta", Color.rgb(160, 20, 30)) { showWebPage("Excluir conta", "/settings", "Excluir conta", back) }
+        )
     }
 
     private fun showProfile(username: String?) {
@@ -1937,7 +1978,7 @@ class MainActivity : Activity() {
             Triple("Jogos", Pair(R.drawable.ic_apps, green)) { showWebPage("Jogos", "/jogos") }
         )
         val last = ArrayList<Triple<String, Pair<Int, Int>, () -> Unit>>()
-        last.add(Triple("Configurações", Pair(R.drawable.ic_shield, gray)) { showWebPage("Configurações", "/settings") })
+        last.add(Triple("Configurações", Pair(R.drawable.ic_shield, gray)) { showSettings() })
         if (isAdminUser) last.add(Triple("Painel admin", Pair(R.drawable.ic_shield, red)) { showWebPage("Painel admin", "/admin") })
         last.add(Triple("Atualização do app", Pair(R.drawable.ic_dns, blue)) { checkUpdate(true) })
         last.add(Triple("Sair da conta", Pair(R.drawable.ic_plus, red)) { logout() })
