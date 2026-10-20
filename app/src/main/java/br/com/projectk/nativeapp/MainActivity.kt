@@ -887,6 +887,7 @@ class MainActivity : Activity() {
     }
 
     private fun showFeed(mode: String = "todos") {
+        checkUpdate(false)
         val c = screen("Início", "Início")
         val tabs = LinearLayout(this)
         tabs.orientation = LinearLayout.HORIZONTAL
@@ -1715,6 +1716,36 @@ class MainActivity : Activity() {
     }
 
     // ---------- Mais, notificações e servidores ----------
+    private var updateChecked = false
+
+    private fun checkUpdate(manual: Boolean) {
+        if (updateChecked && !manual) return
+        updateChecked = true
+        thread {
+            try {
+                val c = java.net.URL("https://api.github.com/repos/Flavio09876/ProjectKNative/releases/tags/apk-latest").openConnection() as java.net.HttpURLConnection
+                c.connectTimeout = 10000; c.readTimeout = 10000
+                val body = c.inputStream.bufferedReader().readText()
+                val notes = org.json.JSONObject(body).optString("body")
+                val latest = Regex("build (\\d+)").find(notes)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                val cur = packageManager.getPackageInfo(packageName, 0).versionCode
+                runOnUiThread {
+                    if (latest > cur) {
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle("Nova versão disponível")
+                            .setMessage("Versão $latest disponível (a sua é $cur). Baixar e instalar agora?")
+                            .setPositiveButton("Atualizar") { _, _ ->
+                                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/Flavio09876/ProjectKNative/releases/download/apk-latest/ProjectK-debug.apk")))
+                            }
+                            .setNegativeButton("Depois", null).show()
+                    } else if (manual) Toast.makeText(this, "Você já está na versão mais recente ($cur).", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Throwable) {
+                if (manual) runOnUiThread { Toast.makeText(this, "Não foi possível verificar agora.", Toast.LENGTH_SHORT).show() }
+            }
+        }
+    }
+
     private fun showMore() {
         val c = screen("Mais", "Mais")
         fun row(title: String, sub: String, go: () -> Unit) {
@@ -1733,6 +1764,7 @@ class MainActivity : Activity() {
         row("Tarefas", "Missões e recompensas") { showWebPage("Tarefas", "/tarefas") }
         row("Configurações", "Conta e preferências") { showWebPage("Configurações", "/settings") }
         if (isAdminUser) row("Painel admin", "Administração do site") { showWebPage("Painel admin", "/admin") }
+        row("Verificar atualização", "Versão instalada: " + try { packageManager.getPackageInfo(packageName, 0).versionCode } catch (e: Throwable) { 0 }) { checkUpdate(true) }
         row("Sair da conta", "Encerrar a sessão neste aparelho") { logout() }
     }
 

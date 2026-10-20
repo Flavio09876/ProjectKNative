@@ -16,8 +16,18 @@ android {
         applicationId = "br.com.projectk.nativeapp"
         minSdk = 23
         targetSdk = 28
-        versionCode = 1
-        versionName = "0.1.0"
+        val b = (project.findProperty("build") as String?)?.toIntOrNull() ?: 1
+        versionCode = b
+        versionName = "0.1.$b"
+    }
+
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 }
 

@@ -27,7 +27,7 @@ jobs:
           gradle-version: '8.9'
 
       - name: Build debug APK
-        run: gradle assembleDebug
+        run: gradle assembleDebug -Pbuild=${{ github.run_number }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -43,4 +43,4 @@ jobs:
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk ProjectK-debug.apk
           gh release delete apk-latest --cleanup-tag -y || true
-          gh release create apk-latest ProjectK-debug.apk --title "APK mais recente" --notes "Build do commit ${{ github.sha }}" --prerelease
+          gh release create apk-latest ProjectK-debug.apk --title "APK mais recente" --notes "build ${{ github.run_number }} commit ${{ github.sha }}" --prerelease
