@@ -139,8 +139,7 @@ object Frames {
             wv.settings.javaScriptEnabled = false
             val host = a.window.decorView as android.view.ViewGroup
             wv.layoutParams = android.widget.FrameLayout.LayoutParams(side, side)
-            wv.translationX = -20000f
-            host.addView(wv)
+            host.addView(wv, 0)
             var done = false
             val end = { bmp: android.graphics.Bitmap? ->
                 if (!done) {
@@ -161,7 +160,11 @@ object Frames {
                             val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
                             p.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
                             c.drawCircle(side / 2f, side / 2f, sizeDp * dens / 2f - 1f, p)
-                            end(bmp)
+                            var any = false
+                            val st = Math.max(1, side / 24)
+                            var y = 0
+                            while (y < side && !any) { var x = 0; while (x < side) { if ((bmp.getPixel(x, y) ushr 24) > 8) { any = true; break }; x += st }; y += st }
+                            end(if (any) bmp else null)
                         } catch (e: Throwable) { end(null) }
                     }, 450)
                 }

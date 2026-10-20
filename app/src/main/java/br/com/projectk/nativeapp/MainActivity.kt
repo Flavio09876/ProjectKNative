@@ -527,7 +527,16 @@ class MainActivity : Activity() {
         val fi = ImageView(this)
         fi.scaleType = ImageView.ScaleType.FIT_XY
         box.addView(fi, FrameLayout.LayoutParams(dp(ov), dp(ov), Gravity.CENTER))
-        Frames.snapshot(frame, sizeDp) { bmp -> if (bmp != null) { fi.alpha = 0f; fi.setImageBitmap(bmp); fi.animate().alpha(1f).setDuration(200).start() } }
+        Frames.snapshot(frame, sizeDp) { bmp ->
+            if (bmp != null) { fi.alpha = 0f; fi.setImageBitmap(bmp); fi.animate().alpha(1f).setDuration(200).start() }
+            else {
+                val cs = Frames.colorsOf(Regex("uf-\\d+|cx-[0-9a-fA-F]+-[0-9a-fA-F]+|k-frame--([a-z0-9]+)").findAll(frame).map { it.groupValues[1].ifEmpty { it.value } }.lastOrNull())
+                    ?: intArrayOf(violet, Color.rgb(255, 154, 31), violet)
+                val g = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.TRANSPARENT); setStroke(dp(fw), cs[0]) }
+                val rv = View(this); rv.background = g
+                box.addView(rv, FrameLayout.LayoutParams(dp(tot), dp(tot), Gravity.CENTER))
+            }
+        }
         box.layoutParams = LinearLayout.LayoutParams(dp(tot), dp(tot))
         return box
     }
