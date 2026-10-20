@@ -34,7 +34,7 @@ data class Profile(
 )
 
 object Parse {
-    fun doc(html: String): Document = Jsoup.parse(html, Net.BASE).also { Frames.feed(it) }
+    fun doc(html: String): Document = Jsoup.parse(html, Net.BASE).also { Frames.feed(it); Frames.addCss(it) }
 
     private fun src(e: Element?): String? {
         if (e == null) return null
@@ -79,24 +79,19 @@ object Parse {
     }
 
 
-    private val SIZES = setOf("xs", "sm", "md", "lg", "xl", "u")
+    private val SIZES = setOf("xs", "sm", "md", "lg", "xl")
 
-    /** Chave da moldura (k-frame--chave) dentro de um elemento, ignorando as classes de tamanho. */
+    /** Classes CSS da moldura (k-frame ...), sem as de tamanho. Null se não houver moldura. */
     fun frameKey(root: Element?): String? {
         if (root == null) return null
         val els = ArrayList<Element>()
         els.add(root)
-        els.addAll(root.select("[class*='k-frame--']"))
+        els.addAll(root.select(".k-frame"))
         for (e in els) {
             val cn = e.classNames()
-            cn.firstOrNull { it.matches(Regex("uf-\\d+")) }?.let { return it }
-            cn.firstOrNull { it.startsWith("cx-") }?.let { if (cn.contains("k-frame--c") || cn.any { x -> x.startsWith("k-frame--c-") }) return it }
-            for (c in cn) {
-                if (c.startsWith("k-frame--")) {
-                    val k = c.removePrefix("k-frame--")
-                    if (k !in SIZES) return k
-                }
-            }
+            if (!cn.contains("k-frame")) continue
+            val keep = cn.filter { !(it.startsWith("k-frame--") && it.removePrefix("k-frame--") in SIZES) && !it.startsWith("z-") && !it.startsWith("k-avatar") }
+            if (keep.any { it.startsWith("k-frame--") }) return keep.joinToString(" ")
         }
         return null
     }

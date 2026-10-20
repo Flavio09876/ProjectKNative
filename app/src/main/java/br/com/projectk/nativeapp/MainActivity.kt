@@ -71,6 +71,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Img.init(applicationContext)
+        Frames.init(this)
         super.onCreate(savedInstanceState)
 
         window.statusBarColor = bg
@@ -512,46 +513,21 @@ class MainActivity : Activity() {
         }
         base.outlineProvider = round
         base.clipToOutline = true
-        val f = Frames.get(frame)
         if (frame == null) {
             base.layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
             return base
         }
-        if (f != null) {
-            val ov = (sizeDp * (1f + 2f * f.inset / 100f)).toInt()
-            val box = FrameLayout(this)
-            box.clipChildren = false
-            box.addView(base, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
-            val fi = ImageView(this)
-            fi.scaleType = ImageView.ScaleType.FIT_XY
-            Img.load(f.url, fi, 512)
-            box.addView(fi, FrameLayout.LayoutParams(dp(ov), dp(ov), Gravity.CENTER))
-            box.layoutParams = LinearLayout.LayoutParams(dp(ov), dp(ov))
-            return box
-        }
-        val cs = Frames.colorsOf(frame) ?: intArrayOf(violet, Color.rgb(255, 154, 31), violet)
-        val tot = sizeDp + 8
+        val fw = Math.max(3, (sizeDp * 0.0625f).toInt())
+        val tot = sizeDp + fw * 2
         val box = FrameLayout(this)
-        val ring = View(this)
-        val g = GradientDrawable()
-        g.shape = GradientDrawable.OVAL
-        g.setColor(Color.TRANSPARENT)
-        g.setStroke(dp(3), cs[0])
-        try {
-            if (cs.size > 1) {
-                g.gradientType = GradientDrawable.SWEEP_GRADIENT
-                g.colors = cs + cs[0]
-            }
-        } catch (e: Throwable) {}
-        ring.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            if (cs.size > 1) { colors = cs + cs[0]; gradientType = GradientDrawable.SWEEP_GRADIENT } else setColor(cs[0])
-        }
-        box.addView(ring, FrameLayout.LayoutParams(dp(tot), dp(tot), Gravity.CENTER))
-        val hole = View(this)
-        hole.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.rgb(7, 5, 10)) }
-        box.addView(hole, FrameLayout.LayoutParams(dp(sizeDp + 3), dp(sizeDp + 3), Gravity.CENTER))
+        box.clipChildren = false
+        box.clipToPadding = false
         box.addView(base, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
+        val ov = (sizeDp * Frames.SCALE).toInt()
+        val fi = ImageView(this)
+        fi.scaleType = ImageView.ScaleType.FIT_XY
+        box.addView(fi, FrameLayout.LayoutParams(dp(ov), dp(ov), Gravity.CENTER))
+        Frames.snapshot(frame, sizeDp) { bmp -> if (bmp != null) { fi.alpha = 0f; fi.setImageBitmap(bmp); fi.animate().alpha(1f).setDuration(200).start() } }
         box.layoutParams = LinearLayout.LayoutParams(dp(tot), dp(tot))
         return box
     }
@@ -1521,21 +1497,29 @@ class MainActivity : Activity() {
                 val cv = ImageView(this)
                 cv.scaleType = ImageView.ScaleType.CENTER_CROP
                 cv.setBackgroundColor(Color.rgb(42, 12, 17))
-                cv.layoutParams = params().apply { bottomMargin = dp(8) }
+                cv.layoutParams = params().apply { bottomMargin = 0 }
                 (cv.layoutParams as LinearLayout.LayoutParams).height = dp(150)
                 cv.outlineProvider = object : ViewOutlineProvider() {
-                    override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, dp(26).toFloat()) }
+                    override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height + dp(30), dp(26).toFloat()) }
                 }
                 cv.clipToOutline = true
                 Img.load(p.cover, cv, 1080)
                 c.addView(cv)
             }
-            val head = card().apply { background = rounded(Color.rgb(50, 12, 20), 26f) }
+            val head = card().apply {
+                background = rounded(Color.rgb(50, 12, 20), 26f)
+                if (p.cover != null) {
+                    background = GradientDrawable().apply {
+                        setColor(Color.rgb(50, 12, 20))
+                        val r = dp(26).toFloat()
+                        cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r)
+                        setStroke(dp(1), Color.argb(80, 225, 29, 46))
+                    }
+                }
+            }
             val r1 = LinearLayout(this)
             r1.orientation = LinearLayout.HORIZONTAL
             r1.gravity = Gravity.CENTER_VERTICAL
-            r1.clipChildren = false
-            head.clipChildren = false
             r1.addView(avatarView(p.avatar, p.name, 76, p.frame))
             val nm = LinearLayout(this)
             nm.orientation = LinearLayout.VERTICAL
@@ -1543,7 +1527,7 @@ class MainActivity : Activity() {
             nm.addView(nameRow(p.name, p.verified, p.role, 21f))
             nm.addView(text("@${p.username}", 13f, muted))
             r1.addView(nm)
-            if (p.cover != null) head.addView(r1, LinearLayout.LayoutParams(-1, -2).apply { topMargin = -dp(40) }) else head.addView(r1)
+            head.addView(r1)
             if (p.status.isNotBlank()) head.addView(text("● ${p.status}", 13f, violet).apply { setPadding(dp(2), dp(10), dp(2), dp(2)) })
             if (p.badges.isNotEmpty()) {
                 val hs = android.widget.HorizontalScrollView(this)
