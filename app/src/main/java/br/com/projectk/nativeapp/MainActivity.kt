@@ -272,6 +272,12 @@ class MainActivity : Activity() {
         addSpace(8)
         loginButton = makeButton("Entrar") { login() }
         root.addView(loginButton, params())
+        addSpace(10)
+        root.addView(label("ou", 12f).apply { gravity = Gravity.CENTER; setTextColor(Color.rgb(169, 154, 157)) }, params())
+        addSpace(10)
+        val dc = makeButton("Entrar com Discord") { discordLogin() }
+        dc.background = GradientDrawable().apply { setColor(Color.rgb(88, 101, 242)); cornerRadius = dp(16).toFloat() }
+        root.addView(dc, params())
 
         addSpace(16)
         status = label("", 13f).apply {
@@ -280,6 +286,68 @@ class MainActivity : Activity() {
         }
         root.addView(status, params())
 
+    }
+
+    private var dotsRun: Runnable? = null
+    private var dotsAnim: android.animation.ObjectAnimator? = null
+
+    private fun startDots() {
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        var n = 0
+        val r = object : Runnable {
+            override fun run() {
+                loginButton.text = "Entrando" + ".".repeat(n % 4)
+                n++
+                h.postDelayed(this, 350)
+            }
+        }
+        dotsRun = r
+        h.post(r)
+        dotsAnim = android.animation.ObjectAnimator.ofFloat(loginButton, "alpha", 1f, 0.55f).apply {
+            duration = 700; repeatMode = android.animation.ValueAnimator.REVERSE; repeatCount = android.animation.ValueAnimator.INFINITE; start()
+        }
+    }
+
+    private fun stopDots() {
+        dotsRun?.let { android.os.Handler(android.os.Looper.getMainLooper()).removeCallbacks(it) }
+        dotsRun = null
+        dotsAnim?.cancel(); dotsAnim = null
+        try { loginButton.alpha = 1f; loginButton.text = "Entrar" } catch (e: Throwable) {}
+    }
+
+    private fun discordLogin() {
+        val dlg = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val wv = android.webkit.WebView(this)
+        wv.settings.javaScriptEnabled = true
+        wv.settings.domStorageEnabled = true
+        val cm = android.webkit.CookieManager.getInstance()
+        cm.setAcceptCookie(true)
+        var done = false
+        wv.webViewClient = object : android.webkit.WebViewClient() {
+            override fun onPageFinished(v: android.webkit.WebView, url: String?) {
+                if (done || url == null) return
+                val u = android.net.Uri.parse(url)
+                if (u.host == android.net.Uri.parse(Net.BASE).host && (u.path == "/home" || u.path == "/home/")) {
+                    done = true
+                    try {
+                        val store = (CookieHandler.getDefault() as CookieManager).cookieStore
+                        (cm.getCookie(Net.BASE) ?: "").split(";").forEach { kv ->
+                            val p = kv.trim().split("=", limit = 2)
+                            if (p.size == 2 && p[0].isNotBlank()) {
+                                val hc = HttpCookie(p[0], p[1]); hc.path = "/"
+                                store.add(URI(Net.BASE), hc)
+                            }
+                        }
+                        saveCookies()
+                    } catch (e: Throwable) {}
+                    dlg.dismiss()
+                    showHome("")
+                }
+            }
+        }
+        dlg.setContentView(wv)
+        dlg.show()
+        wv.loadUrl(Net.BASE + "/auth/discord")
     }
 
     private fun login() {
@@ -295,7 +363,8 @@ class MainActivity : Activity() {
 
         busy = true
         loginButton.isEnabled = false
-        status.text = "Autenticando..."
+        status.text = ""
+        startDots()
         status.setTextColor(Color.LTGRAY)
 
         thread {
@@ -362,6 +431,7 @@ class MainActivity : Activity() {
 
             runOnUiThread {
                 busy = false
+                stopDots()
                 if (success) {
                     showHome(message)
                 } else {
@@ -1599,8 +1669,12 @@ class MainActivity : Activity() {
                 return false
             }
         }
-        val h = resources.displayMetrics.heightPixels - dp(250)
-        c.addView(wv, LinearLayout.LayoutParams(-1, h))
+        val lpw = LinearLayout.LayoutParams(-1, resources.displayMetrics.heightPixels - dp(250))
+        c.addView(wv, lpw)
+        c.post {
+            val sv = c.parent as? View
+            if (sv != null && sv.height > 0) { lpw.height = sv.height - dp(6); wv.layoutParams = lpw }
+        }
         wv.loadUrl(Net.BASE + path)
     }
 
