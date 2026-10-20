@@ -77,6 +77,9 @@ class MainActivity : Activity() {
                 androidx.work.PeriodicWorkRequestBuilder<Notifier>(15, java.util.concurrent.TimeUnit.MINUTES).build())
         } catch (e: Throwable) {}
         Frames.init(this)
+        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            try { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 91) } catch (e: Throwable) {}
+        }
         super.onCreate(savedInstanceState)
 
         window.statusBarColor = bg

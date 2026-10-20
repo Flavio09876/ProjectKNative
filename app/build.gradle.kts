@@ -15,7 +15,7 @@ android {
     defaultConfig {
         applicationId = "br.com.projectk.nativeapp"
         minSdk = 23
-        targetSdk = 28
+        targetSdk = 34
         val b = (project.findProperty("build") as String?)?.toIntOrNull() ?: 1
         versionCode = b
         versionName = "0.1.$b"
