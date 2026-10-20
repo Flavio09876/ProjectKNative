@@ -1518,7 +1518,9 @@ class MainActivity : Activity() {
         }, { m -> st.text = "Falha ao abrir: $m"; st.setTextColor(errorColor) })
     }
 
-    private fun openWebProfile(c: LinearLayout, u: String) {
+    private fun openWebProfile(c: LinearLayout, u: String) = openWeb(c, "/u/" + enc(u), "/u/")
+
+    private fun openWeb(c: LinearLayout, path: String, stayPrefix: String) {
         try {
             val cm = android.webkit.CookieManager.getInstance()
             cm.setAcceptCookie(true)
@@ -1531,24 +1533,35 @@ class MainActivity : Activity() {
         wv.setBackgroundColor(Color.rgb(7, 5, 10))
         wv.settings.javaScriptEnabled = true
         wv.settings.domStorageEnabled = true
+        wv.settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+        wv.overScrollMode = View.OVER_SCROLL_NEVER
         wv.setOnTouchListener { v, _ -> v.parent.requestDisallowInterceptTouchEvent(true); false }
         val css = "header.topbar,.k-side,nav.top-navigation,footer.mobile-navigation,.k-sheet,#k-more-btn{display:none!important}" +
             "html,body{background:#07050a!important}.main-content{margin:0!important;padding:8px!important;max-width:100%!important;width:100%!important}" +
-            "body{padding:0!important}"
-        val js = "(function(){var s=document.createElement('style');s.textContent=" + org.json.JSONObject.quote(css) + ";document.head.appendChild(s);})()"
+            "body{padding:0!important}" +
+            "*{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}" +
+            "body::before,body::after,.aurora,canvas.aurora,#aurora{display:none!important}" +
+            ".z-profile-cover,.z-profile-cover *{animation:none!important}"
+        val js = "(function(){if(document.getElementById('kapp'))return;var s=document.createElement('style');s.id='kapp';s.textContent=" + org.json.JSONObject.quote(css) + ";document.head.appendChild(s);})()"
         wv.webViewClient = object : android.webkit.WebViewClient() {
             override fun onPageStarted(v: android.webkit.WebView, url: String?, f: android.graphics.Bitmap?) { v.evaluateJavascript(js, null) }
             override fun onPageFinished(v: android.webkit.WebView, url: String?) { v.evaluateJavascript(js, null) }
             override fun shouldOverrideUrlLoading(v: android.webkit.WebView, r: android.webkit.WebResourceRequest): Boolean {
                 val p = r.url.path ?: ""
-                if (p.startsWith("/u/")) return false
                 if (p.startsWith("/settings/profile")) { editProfile(); return true }
-                return true
+                if (r.url.host != android.net.Uri.parse(Net.BASE).host) return true
+                if (p.startsWith("/login")) return true
+                return false
             }
         }
-        val h = resources.displayMetrics.heightPixels - dp(230)
+        val h = resources.displayMetrics.heightPixels - dp(250)
         c.addView(wv, LinearLayout.LayoutParams(-1, h))
-        wv.loadUrl(Net.BASE + "/u/" + enc(u))
+        wv.loadUrl(Net.BASE + path)
+    }
+
+    private fun showWebPage(title: String, path: String) {
+        val c = screen("Mais", title, back = { showMore() })
+        openWeb(c, path, "/")
     }
 
     private fun showProfileNative(username: String?) {
@@ -1737,8 +1750,14 @@ class MainActivity : Activity() {
         }
         row("Meu perfil", "Publicações, insígnias e edição") { showProfile(null) }
         row("Notificações", "Atividade da sua conta") { showNotifs() }
+        row("Loja", "Molduras, efeitos e criações") { showWebPage("Loja", "/loja") }
+        row("Jogos", "Cassino, minas, cobrinha e mais") { showWebPage("Jogos", "/jogos") }
+        row("Carteira", "K-coins, pontos e cristais") { showWebPage("Carteira", "/carteira") }
+        row("Conquistas", "Insígnias e progresso") { showWebPage("Conquistas", "/conquistas") }
+        row("Tarefas", "Missões e recompensas") { showWebPage("Tarefas", "/tarefas") }
+        row("Configurações", "Conta e preferências") { showWebPage("Configurações", "/settings") }
+        if (isAdminUser) row("Painel admin", "Administração do site") { showWebPage("Painel admin", "/admin") }
         row("Sair da conta", "Encerrar a sessão neste aparelho") { logout() }
-        addLine(c, "Loja, jogos, carteira e painel chegam nas próximas etapas.", 12f, muted)
     }
 
     private fun showNotifs() {
