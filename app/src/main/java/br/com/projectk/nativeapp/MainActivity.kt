@@ -1319,7 +1319,12 @@ class MainActivity : Activity() {
         }
         if (!mine && who.isNotBlank()) b.addView(text(who, 11f, violet).apply { typeface = Typeface.DEFAULT_BOLD })
         if (body.isNotBlank()) b.addView(text(body, 15f))
-        if (media != null) b.addView(imageBlock(media))
+        if (media != null) {
+            val iv = imageBlock(media)
+            iv.minimumHeight = dp(120)
+            iv.setOnClickListener { try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(media))) } catch (e: Throwable) {} }
+            b.addView(iv, LinearLayout.LayoutParams(dp(230), ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+        }
         if (time.isNotBlank()) b.addView(text(time, 10f, muted).apply { gravity = Gravity.END })
         wrap.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             if (mine) leftMargin = dp(50) else rightMargin = dp(50)
@@ -1512,12 +1517,20 @@ class MainActivity : Activity() {
 
     private fun chatText(m: JSONObject): Pair<String, String?> {
         val raw = m.optString("content", "")
+        if (raw.startsWith("[[PZ_MEDIA]]")) {
+            val rest = raw.removePrefix("[[PZ_MEDIA]]")
+            val i = rest.indexOf("[[PZ_TEXT]]")
+            val url = (if (i >= 0) rest.substring(0, i) else rest).trim()
+            val txt = if (i >= 0) rest.substring(i + 11).trim() else ""
+            return Pair(txt, Net.abs(url))
+        }
         if (raw.startsWith("[[")) {
             val end = raw.indexOf("]]")
             val tag = if (end > 0) raw.substring(2, end) else ""
             val rest = if (end > 0) raw.substring(end + 2).trim() else raw
             val url = Net.abs(rest.takeIf { it.startsWith("/") || it.startsWith("http") })
-            return if (tag.contains("MEDIA") && url != null) Pair("", url) else Pair("[anexo]", null)
+            if (tag.contains("MEDIA") && url != null) return Pair("", url)
+            return Pair(Regex("\\[\\[PZ_[A-Z]+\\]\\]").replace(raw, " ").trim().ifEmpty { "[anexo]" }, null)
         }
         return Pair(raw, null)
     }
