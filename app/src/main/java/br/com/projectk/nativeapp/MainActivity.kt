@@ -71,6 +71,11 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Img.init(applicationContext)
+        try {
+            androidx.work.WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+                "k-notif", androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+                androidx.work.PeriodicWorkRequestBuilder<Notifier>(15, java.util.concurrent.TimeUnit.MINUTES).build())
+        } catch (e: Throwable) {}
         Frames.init(this)
         super.onCreate(savedInstanceState)
 
@@ -1048,6 +1053,14 @@ class MainActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 78) {
+            chatAttach = if (resultCode == RESULT_OK) data?.data else null
+            if (chatAttach != null) toast("Arquivo anexado. Toque em Enviar.")
+        }
+        if (requestCode == 79) {
+            fileCb?.onReceiveValue(android.webkit.WebChromeClient.FileChooserParams.parseResult(resultCode, data))
+            fileCb = null
+        }
         if (requestCode == 77 && resultCode == RESULT_OK && data?.data != null) {
             pickedUri = data.data
             pickedLabel?.text = "Imagem anexada"
@@ -1314,6 +1327,16 @@ class MainActivity : Activity() {
         return wrap
     }
 
+    private var chatAttach: android.net.Uri? = null
+    private var fileCb: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
+
+    private fun readUpload(uri: android.net.Uri, field: String): Upload {
+        val mime = contentResolver.getType(uri) ?: "image/jpeg"
+        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw Exception("Não consegui ler o arquivo.")
+        val ext = when { mime.contains("png") -> "png"; mime.contains("webp") -> "webp"; mime.contains("gif") -> "gif"; mime.contains("mp4") -> "mp4"; mime.contains("video") -> "mp4"; else -> "jpg" }
+        return Upload(field, "arquivo.$ext", mime, bytes)
+    }
+
     private fun footerBar(hintText: String, onSend: (EditText, TextView) -> Unit): LinearLayout {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1325,6 +1348,15 @@ class MainActivity : Activity() {
         input.maxLines = 3
         val send = pill("Enviar") {}
         send.setOnClickListener { onSend(input, send) }
+        chatAttach = null
+        val clip = pill("+") {}
+        clip.setOnClickListener {
+            val i = Intent(Intent.ACTION_GET_CONTENT)
+            i.type = "*/*"
+            i.putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+            startActivityForResult(Intent.createChooser(i, "Anexar"), 78)
+        }
+        bar.addView(clip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(6) })
         bar.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(8) })
         bar.addView(send)
         return bar
@@ -1355,11 +1387,14 @@ class MainActivity : Activity() {
         var firstId = Long.MAX_VALUE
         val footer = footerBar("Mensagem para a sala") { input, send ->
             val t = input.text.toString().trim()
-            if (t.isEmpty()) return@footerBar
+            val att = chatAttach
+            if (t.isEmpty() && att == null) return@footerBar
             send.isEnabled = false
             thread {
                 try {
-                    val resp = Net.postForm("/salas/${r.id}/enviar", listOf(Pair("body", t)))
+                    val resp = if (att != null) Net.postMultipart("/salas/${r.id}/enviar", listOf(Pair("body", t)), readUpload(att, "media"), "application/json")
+                        else Net.postForm("/salas/${r.id}/enviar", listOf(Pair("body", t)))
+                    chatAttach = null
                     val j = JSONObject(resp.body)
                     runOnUiThread {
                         send.isEnabled = true
@@ -1494,11 +1529,14 @@ class MainActivity : Activity() {
         var list: LinearLayout? = null
         val footer = footerBar("Mensagem") { input, send ->
             val t = input.text.toString().trim()
-            if (t.isEmpty() || convId == 0) return@footerBar
+            val att = chatAttach
+            if ((t.isEmpty() && att == null) || convId == 0) return@footerBar
             send.isEnabled = false
             thread {
                 try {
-                    val resp = Net.postForm("/api/chat/$convId/send", listOf(Pair("content", t)))
+                    val resp = if (att != null) Net.postMultipart("/api/chat/$convId/send", listOf(Pair("content", t)), readUpload(att, "attachment"), "application/json")
+                        else Net.postForm("/api/chat/$convId/send", listOf(Pair("content", t)))
+                    chatAttach = null
                     val j = JSONObject(resp.body)
                     runOnUiThread {
                         send.isEnabled = true
@@ -1658,6 +1696,13 @@ class MainActivity : Activity() {
             "body::before,body::after,.aurora,canvas.aurora,#aurora{display:none!important}" +
             ".z-profile-cover,.z-profile-cover *{animation:none!important}"
         val js = "(function(){if(document.getElementById('kapp'))return;var s=document.createElement('style');s.id='kapp';s.textContent=" + org.json.JSONObject.quote(css) + ";document.head.appendChild(s);})()"
+        wv.webChromeClient = object : android.webkit.WebChromeClient() {
+            override fun onShowFileChooser(v: android.webkit.WebView, cb: android.webkit.ValueCallback<Array<android.net.Uri>>, p: FileChooserParams): Boolean {
+                fileCb?.onReceiveValue(null)
+                fileCb = cb
+                return try { startActivityForResult(p.createIntent(), 79); true } catch (e: Throwable) { fileCb = null; false }
+            }
+        }
         wv.webViewClient = object : android.webkit.WebViewClient() {
             override fun onPageStarted(v: android.webkit.WebView, url: String?, f: android.graphics.Bitmap?) { v.evaluateJavascript(js, null) }
             override fun onPageFinished(v: android.webkit.WebView, url: String?) { v.evaluateJavascript(js, null) }
