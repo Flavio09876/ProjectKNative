@@ -1499,7 +1499,7 @@ class MainActivity : Activity() {
     }
 
     // ---------- Perfil ----------
-    private fun showProfile(username: String?) {
+    private fun showProfileOld(username: String?) {
         val mine = username == null || username == meUser
         val backFn: (() -> Unit)? = if (mine) null else fun() { showFeed() }
         val c = screen("Mais", if (mine) "Meu perfil" else "@$username", back = backFn)
@@ -1516,6 +1516,48 @@ class MainActivity : Activity() {
             c.removeView(st)
             openWebProfile(c, u)
         }, { m -> st.text = "Falha ao abrir: $m"; st.setTextColor(errorColor) })
+    }
+
+    private fun openWebHeader(c: LinearLayout, u: String) {
+        try {
+            val cm = android.webkit.CookieManager.getInstance()
+            cm.setAcceptCookie(true)
+            (java.net.CookieHandler.getDefault() as? java.net.CookieManager)?.cookieStore?.cookies?.forEach {
+                cm.setCookie(Net.BASE, it.name + "=" + it.value + "; Path=/")
+            }
+            cm.flush()
+        } catch (e: Throwable) {}
+        val wv = android.webkit.WebView(this)
+        wv.setBackgroundColor(Color.rgb(7, 5, 10))
+        wv.settings.javaScriptEnabled = true
+        wv.settings.domStorageEnabled = true
+        wv.overScrollMode = View.OVER_SCROLL_NEVER
+        wv.isVerticalScrollBarEnabled = false
+        wv.setOnTouchListener { v, ev -> ev.action == android.view.MotionEvent.ACTION_MOVE }
+        val css = "header.topbar,.k-side,nav.top-navigation,footer.mobile-navigation,.k-sheet,#k-more-btn{display:none!important}" +
+            ".z-profile-actions,.z-profile-bio,.z-profile-meta,.z-profile-tabs,.z-profile-tabs~*{display:none!important}" +
+            "html,body{background:#07050a!important;margin:0!important;padding:0!important;overflow:hidden!important}" +
+            ".main-content{margin:0!important;padding:0!important;max-width:100%!important;width:100%!important}" +
+            "*{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}body::before,body::after,.aurora,#aurora{display:none!important}"
+        val js = "(function(){if(!document.getElementById('kapp')){var s=document.createElement('style');s.id='kapp';s.textContent=" + org.json.JSONObject.quote(css) + ";document.head.appendChild(s);}return document.body.scrollHeight;})()"
+        val lp = LinearLayout.LayoutParams(-1, dp(420))
+        fun fit(v: android.webkit.WebView) {
+            v.evaluateJavascript(js) { r ->
+                val px = r?.trim('"')?.toFloatOrNull()
+                if (px != null && px > 50) { lp.height = (px * resources.displayMetrics.density).toInt() + dp(8); v.layoutParams = lp }
+            }
+        }
+        wv.webViewClient = object : android.webkit.WebViewClient() {
+            override fun onPageStarted(v: android.webkit.WebView, url: String?, f: android.graphics.Bitmap?) { fit(v) }
+            override fun onPageFinished(v: android.webkit.WebView, url: String?) {
+                fit(v)
+                v.postDelayed({ fit(v) }, 700)
+                v.postDelayed({ fit(v) }, 1800)
+            }
+            override fun shouldOverrideUrlLoading(v: android.webkit.WebView, r: android.webkit.WebResourceRequest): Boolean = true
+        }
+        c.addView(wv, lp)
+        wv.loadUrl(Net.BASE + "/u/" + enc(u))
     }
 
     private fun openWebProfile(c: LinearLayout, u: String) = openWeb(c, "/u/" + enc(u), "/u/")
@@ -1564,7 +1606,7 @@ class MainActivity : Activity() {
         openWeb(c, path, "/")
     }
 
-    private fun showProfileNative(username: String?) {
+    private fun showProfile(username: String?) {
         val mine = username == null || username == meUser
         val backFn: (() -> Unit)? = if (mine) null else fun() { showFeed() }
         val c = screen("Mais", if (mine) "Meu perfil" else "@$username", back = backFn)
@@ -1581,73 +1623,7 @@ class MainActivity : Activity() {
             Parse.profile(d, u, u == meUser)
         }, { p ->
             c.removeView(st)
-            if (p.cover != null) {
-                val cv = ImageView(this)
-                cv.scaleType = ImageView.ScaleType.CENTER_CROP
-                cv.setBackgroundColor(Color.rgb(42, 12, 17))
-                cv.layoutParams = params().apply { bottomMargin = 0 }
-                (cv.layoutParams as LinearLayout.LayoutParams).height = dp(150)
-                cv.outlineProvider = object : ViewOutlineProvider() {
-                    override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height + dp(30), dp(26).toFloat()) }
-                }
-                cv.clipToOutline = true
-                Img.load(p.cover, cv, 1080)
-                c.addView(cv)
-            }
-            val head = card().apply {
-                background = rounded(Color.rgb(50, 12, 20), 26f)
-                if (p.cover != null) {
-                    background = GradientDrawable().apply {
-                        setColor(Color.rgb(50, 12, 20))
-                        val r = dp(26).toFloat()
-                        cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r)
-                        setStroke(dp(1), Color.argb(80, 225, 29, 46))
-                    }
-                }
-            }
-            val r1 = LinearLayout(this)
-            r1.orientation = LinearLayout.HORIZONTAL
-            r1.gravity = Gravity.CENTER_VERTICAL
-            val live = if (Frames.get(Regex("uf-\\d+").find(p.frame ?: "")?.value) == null && (p.frame != null || Frames.profileHtml?.contains("k-frame") == true)) Frames.liveView(this, 150) else null
-            if (live != null) r1.addView(live, LinearLayout.LayoutParams(dp(150), dp(150))) else r1.addView(avatarView(p.avatar, p.name, 76, p.frame))
-            val nm = LinearLayout(this)
-            nm.orientation = LinearLayout.VERTICAL
-            nm.setPadding(dp(14), 0, 0, 0)
-            nm.addView(nameRow(p.name, p.verified, p.role, 21f))
-            nm.addView(text("@${p.username}", 13f, muted))
-            r1.addView(nm)
-            head.addView(r1)
-            if (p.status.isNotBlank()) head.addView(text("● ${p.status}", 13f, violet).apply { setPadding(dp(2), dp(10), dp(2), dp(2)) })
-            if (p.badges.isNotEmpty()) {
-                val hs = android.widget.HorizontalScrollView(this)
-                hs.isHorizontalScrollBarEnabled = false
-                val br = LinearLayout(this)
-                br.orientation = LinearLayout.HORIZONTAL
-                for (svg in p.badges) {
-                    val bi = ImageView(this)
-                    bi.layoutParams = LinearLayout.LayoutParams(dp(30), dp(30)).apply { rightMargin = dp(6) }
-                    Img.loadSvg(svg, bi, dp(30) * 2)
-                    br.addView(bi)
-                }
-                hs.addView(br)
-                head.addView(hs, params().apply { topMargin = dp(10) })
-            }
-            if (p.bio.isNotBlank()) head.addView(text(p.bio, 14f).apply { setPadding(dp(2), dp(12), dp(2), dp(4)) })
-            if (p.stats.isNotEmpty()) {
-                val stats = LinearLayout(this)
-                stats.orientation = LinearLayout.HORIZONTAL
-                stats.setPadding(0, dp(10), 0, 0)
-                for (s in p.stats.take(4)) {
-                    val cell = LinearLayout(this)
-                    cell.orientation = LinearLayout.VERTICAL
-                    cell.gravity = Gravity.CENTER_HORIZONTAL
-                    cell.addView(text(s.second, 16f).apply { typeface = Typeface.DEFAULT_BOLD })
-                    cell.addView(text(s.first, 10f, muted))
-                    stats.addView(cell, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                }
-                head.addView(stats)
-            }
-            c.addView(head)
+            openWebHeader(c, p.username)
             if (p.isMe) {
                 c.addView(pill("Editar perfil") { editProfile() }, params().apply { bottomMargin = dp(8) })
                 c.addView(pill("Sair da conta") { logout() }, params().apply { bottomMargin = dp(14) })
