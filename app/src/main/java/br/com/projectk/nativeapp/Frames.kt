@@ -198,7 +198,7 @@ object Frames {
         val lk = links.joinToString("") { "<link rel='stylesheet' href='" + it + "'>" }
         val html = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>" + lk +
             "<style>" + css + "html,body{margin:0;height:100%;background:transparent!important;overflow:hidden}" +
-            "body{display:grid;place-items:center}.z-profile-avatar-wrap{margin:0!important;width:" + (sizeDp * 0.85f).toInt() + "px!important;height:" + (sizeDp * 0.85f).toInt() + "px!important}</style></head><body>" + inner + "</body></html>"
+            "body{display:grid;place-items:center}.z-profile-avatar-wrap{margin:0!important;width:" + (sizeDp * 0.5f).toInt() + "px!important;height:" + (sizeDp * 0.5f).toInt() + "px!important}</style></head><body>" + inner + "</body></html>"
         wv.loadDataWithBaseURL(Net.BASE + "/", html, "text/html", "utf-8", null)
         return wv
     }
