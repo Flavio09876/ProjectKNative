@@ -1557,7 +1557,7 @@ class MainActivity : Activity() {
             override fun shouldOverrideUrlLoading(v: android.webkit.WebView, r: android.webkit.WebResourceRequest): Boolean = true
         }
         c.addView(wv, lp)
-        wv.loadUrl(Net.BASE + "/u/" + enc(u))
+        wv.loadUrl(Net.BASE + "/u/" + enc(u) + "?app=1")
     }
 
     private fun openWebProfile(c: LinearLayout, u: String) = openWeb(c, "/u/" + enc(u), "/u/")
