@@ -30,4 +30,5 @@ kotlin {
 
 dependencies {
     implementation("org.jsoup:jsoup:1.18.1")
+    implementation("com.caverock:androidsvg-aar:1.4")
 }

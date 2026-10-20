@@ -17,6 +17,7 @@ import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -48,10 +49,10 @@ class MainActivity : Activity() {
     private lateinit var loginButton: Button
     private var busy = false
 
-    private val ink = Color.rgb(8, 9, 14)
-    private val glass = Color.rgb(23, 25, 35)
-    private val muted = Color.rgb(160, 164, 181)
-    private val violet = Color.rgb(157, 111, 255)
+    private val ink = Color.rgb(7, 5, 10)
+    private val glass = Color.rgb(18, 10, 13)
+    private val muted = Color.rgb(169, 154, 157)
+    private val violet = Color.rgb(225, 29, 46)
     private val errorColor = Color.rgb(255, 120, 130)
 
     private val handler = Handler(Looper.getMainLooper())
@@ -61,6 +62,9 @@ class MainActivity : Activity() {
     private lateinit var scrollRef: ScrollView
     private var meUser: String? = null
     private var pollTask: Runnable? = null
+    private var meAvatar: String? = null
+    private var unreadDot = false
+    private var isAdminUser = false
 
     private var pickedUri: Uri? = null
     private var pickedLabel: TextView? = null
@@ -378,7 +382,7 @@ class MainActivity : Activity() {
         return GradientDrawable().apply {
             setColor(color)
             cornerRadius = radius * resources.displayMetrics.density
-            setStroke(dp(1), Color.argb(45, 190, 180, 255))
+            setStroke(dp(1), Color.argb(80, 225, 29, 46))
         }
     }
 
@@ -408,7 +412,7 @@ class MainActivity : Activity() {
         return text(value, 13f, Color.WHITE).apply {
             gravity = Gravity.CENTER
             setPadding(dp(14), dp(10), dp(14), dp(10))
-            background = rounded(Color.rgb(43, 36, 65), 18f)
+            background = rounded(Color.rgb(42, 12, 17), 18f)
             setOnClickListener { action() }
         }
     }
@@ -447,7 +451,7 @@ class MainActivity : Activity() {
         if (url != null) {
             val iv = ImageView(this)
             iv.scaleType = ImageView.ScaleType.CENTER_CROP
-            iv.setBackgroundColor(Color.rgb(43, 36, 65))
+            iv.setBackgroundColor(Color.rgb(42, 12, 17))
             iv.outlineProvider = round
             iv.clipToOutline = true
             iv.layoutParams = lp
@@ -459,7 +463,7 @@ class MainActivity : Activity() {
         tv.gravity = Gravity.CENTER
         tv.textSize = (sizeDp / 2.4f)
         tv.setTextColor(Color.WHITE)
-        tv.setBackgroundColor(Color.rgb(60, 45, 100))
+        tv.setBackgroundColor(Color.rgb(90, 14, 26))
         tv.outlineProvider = round
         tv.clipToOutline = true
         tv.layoutParams = lp
@@ -515,6 +519,44 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun icon(res: Int, color: Int, sizeDp: Int): ImageView {
+        val iv = ImageView(this)
+        iv.setImageResource(res)
+        iv.setColorFilter(color)
+        iv.layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+        return iv
+    }
+
+    private fun seal(): TextView {
+        val t = TextView(this)
+        t.text = "✓"
+        t.textSize = 9f
+        t.setTextColor(Color.WHITE)
+        t.gravity = Gravity.CENTER
+        t.typeface = Typeface.DEFAULT_BOLD
+        val bgd = GradientDrawable()
+        bgd.shape = GradientDrawable.OVAL
+        bgd.setColor(violet)
+        t.background = bgd
+        t.layoutParams = LinearLayout.LayoutParams(dp(15), dp(15)).apply { leftMargin = dp(6) }
+        return t
+    }
+
+    private fun nameRow(name: String, verified: Boolean, role: String, size: Float = 15f): LinearLayout {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        val n = text(name, size)
+        n.typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+        n.maxLines = 1
+        n.ellipsize = TextUtils.TruncateAt.END
+        row.addView(n, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        if (verified) row.addView(seal())
+        if (role == "admin") row.addView(text("♛", 13f, violet).apply { setPadding(dp(6), 0, 0, 0) })
+        if (role == "mod") row.addView(text("◈", 13f, violet).apply { setPadding(dp(6), 0, 0, 0) })
+        return row
+    }
+
     private fun screen(
         tab: String, title: String, back: (() -> Unit)? = null,
         action: View? = null, footer: View? = null
@@ -527,40 +569,58 @@ class MainActivity : Activity() {
         window.navigationBarColor = ink
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
-        val page = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(ink)
-        }
-        val top = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(8))
-        }
+        val page = LinearLayout(this)
+        page.orientation = LinearLayout.VERTICAL
+        page.setBackgroundColor(ink)
+        val top = LinearLayout(this)
+        top.orientation = LinearLayout.HORIZONTAL
+        top.gravity = Gravity.CENTER_VERTICAL
+        top.setPadding(dp(16), dp(12), dp(16), dp(8))
         if (back != null) {
             val b = text("‹", 30f, violet)
             b.setPadding(dp(4), 0, dp(14), dp(4))
             b.setOnClickListener { back() }
             top.addView(b)
         } else {
-            val k = text("K", 29f, violet)
+            val k = TextView(this)
+            k.text = "K"
+            k.textSize = 20f
             k.typeface = Typeface.DEFAULT_BOLD
-            k.setPadding(dp(2), 0, dp(12), 0)
-            top.addView(k)
+            k.setTextColor(Color.WHITE)
+            k.gravity = Gravity.CENTER
+            k.background = rounded(Color.rgb(60, 12, 20), 10f)
+            top.addView(k, LinearLayout.LayoutParams(dp(36), dp(36)).apply { rightMargin = dp(12) })
         }
-        val t = text(title, 19f)
-        t.typeface = Typeface.DEFAULT_BOLD
+        val t = text(title, 21f)
+        t.typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
         t.maxLines = 1
         t.ellipsize = TextUtils.TruncateAt.END
         top.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (action != null) top.addView(action)
+        if (back == null) {
+            val bell = FrameLayout(this)
+            bell.addView(icon(R.drawable.ic_bell, Color.WHITE, 24), FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
+            if (unreadDot) {
+                val dot = View(this)
+                val dg = GradientDrawable()
+                dg.shape = GradientDrawable.OVAL
+                dg.setColor(violet)
+                dot.background = dg
+                bell.addView(dot, FrameLayout.LayoutParams(dp(9), dp(9), Gravity.TOP or Gravity.END).apply { topMargin = dp(5); rightMargin = dp(5) })
+            }
+            bell.setOnClickListener { showNotifs() }
+            top.addView(bell, LinearLayout.LayoutParams(dp(42), dp(42)))
+            val av = avatarView(meAvatar, meUser ?: "K", 34)
+            av.setOnClickListener { showProfile(null) }
+            top.addView(av)
+        }
         page.addView(top)
 
         val scroll = ScrollView(this)
         scrollRef = scroll
-        val c = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(4), dp(16), dp(12))
-        }
+        val c = LinearLayout(this)
+        c.orientation = LinearLayout.VERTICAL
+        c.setPadding(dp(16), dp(4), dp(16), dp(12))
         scroll.addView(c)
         page.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         if (footer != null) page.addView(footer, params())
@@ -571,38 +631,43 @@ class MainActivity : Activity() {
     }
 
     private fun navBar(tab: String): LinearLayout {
-        val nav = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dp(5), dp(8), dp(5), dp(8))
-            background = rounded(Color.rgb(18, 19, 28), 20f)
+        val nav = LinearLayout(this)
+        nav.orientation = LinearLayout.HORIZONTAL
+        nav.gravity = Gravity.CENTER
+        nav.setPadding(dp(4), dp(8), dp(4), dp(8))
+        nav.background = rounded(Color.rgb(14, 8, 11), 22f)
+        fun slot(name: String, res: Int) {
+            val col = LinearLayout(this)
+            col.orientation = LinearLayout.VERTICAL
+            col.gravity = Gravity.CENTER
+            val color = if (name == tab) violet else muted
+            col.addView(icon(res, color, 24))
+            val l = text(name, 10f, color)
+            l.gravity = Gravity.CENTER
+            col.addView(l)
+            col.setOnClickListener { openTab(name) }
+            nav.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
-        for (name in listOf("Início", "Buscar", "Salas", "Chat", "Perfil")) {
-            val item = TextView(this)
-            item.text = when (name) {
-                "Início" -> "⌂\nInício"
-                "Buscar" -> "⌕\nBuscar"
-                "Salas" -> "◇\nSalas"
-                "Chat" -> "▤\nChat"
-                else -> "◉\nPerfil"
-            }
-            item.gravity = Gravity.CENTER
-            item.textSize = 11f
-            item.setTextColor(if (name == tab) violet else muted)
-            item.setPadding(dp(2), dp(5), dp(2), dp(5))
-            item.setOnClickListener { openTab(name) }
-            nav.addView(item, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
+        slot("Início", R.drawable.ic_home)
+        slot("Salas", R.drawable.ic_people)
+        slot("Servidores", R.drawable.ic_dns)
+        val plus = FrameLayout(this)
+        plus.background = rounded(Color.rgb(200, 16, 36), 18f)
+        plus.addView(icon(R.drawable.ic_plus, Color.WHITE, 28), FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
+        plus.setOnClickListener { newPost() }
+        nav.addView(plus, LinearLayout.LayoutParams(dp(54), dp(46)).apply { leftMargin = dp(4); rightMargin = dp(4) })
+        slot("Chat", R.drawable.ic_chat)
+        slot("Mais", R.drawable.ic_apps)
         return nav
     }
 
     private fun openTab(name: String) {
         when (name) {
             "Início" -> showFeed()
-            "Buscar" -> showSearch("")
             "Salas" -> showRooms()
+            "Servidores" -> showServers()
             "Chat" -> showChats()
-            else -> showProfile(null)
+            else -> showMore()
         }
     }
 
@@ -613,30 +678,31 @@ class MainActivity : Activity() {
     }
 
     // ---------- Início ----------
-    private fun postCard(p: Post): LinearLayout {
+    private fun postCard(p: Post, open: Boolean = true): LinearLayout {
         val c = card()
-        val head = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        head.addView(avatarView(p.avatar, p.name, 40))
-        val who = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), 0, 0, 0)
-        }
-        who.addView(text(p.name, 15f).apply { typeface = Typeface.DEFAULT_BOLD })
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.HORIZONTAL
+        head.gravity = Gravity.CENTER_VERTICAL
+        head.addView(avatarView(p.avatar, p.name, 42))
+        val who = LinearLayout(this)
+        who.orientation = LinearLayout.VERTICAL
+        who.setPadding(dp(10), 0, 0, 0)
+        who.addView(nameRow(p.name, p.verified, p.role))
         who.addView(text("@${p.username}  ·  ${p.time}", 11f, muted))
         head.addView(who, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         head.setOnClickListener { showProfile(p.username) }
         c.addView(head)
+        val body = LinearLayout(this)
+        body.orientation = LinearLayout.VERTICAL
         if (p.text.isNotBlank()) {
-            c.addView(text(p.text, 15f).apply { setPadding(dp(2), dp(10), dp(2), dp(2)) })
+            body.addView(text(p.text, 15f).apply { setPadding(dp(2), dp(10), dp(2), dp(2)) })
         }
-        if (p.media != null) c.addView(imageBlock(p.media))
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(8), 0, 0)
-        }
+        if (p.media != null) body.addView(imageBlock(p.media))
+        if (open) body.setOnClickListener { postDetail(p.id) }
+        c.addView(body)
+        val actions = LinearLayout(this)
+        actions.orientation = LinearLayout.HORIZONTAL
+        actions.setPadding(0, dp(8), 0, 0)
         fun heart() = (if (p.liked) "♥ " else "♡ ") + p.likes
         val like = text(heart(), 14f, if (p.liked) violet else muted)
         like.setPadding(dp(2), dp(6), dp(18), dp(6))
@@ -662,9 +728,63 @@ class MainActivity : Activity() {
             }
         }
         actions.addView(like)
-        actions.addView(text("◌ ${p.comments}", 14f, muted).apply { setPadding(dp(2), dp(6), dp(2), dp(6)) })
+        val cm = text("◌ ${p.comments}", 14f, muted)
+        cm.setPadding(dp(2), dp(6), dp(2), dp(6))
+        if (open) cm.setOnClickListener { postDetail(p.id) }
+        actions.addView(cm)
         c.addView(actions)
         return c
+    }
+
+    private fun postDetail(id: Int) {
+        val c = screen("Início", "Publicação", back = { showFeed() })
+        val st = text("Carregando…", 14f, muted)
+        c.addView(st)
+        async({ Parse.doc(Net.get("/post/$id").body) }, { d ->
+            c.removeView(st)
+            val post = Parse.posts(d).firstOrNull()
+            if (post != null) c.addView(postCard(post, false))
+            val coms = Parse.comments(d)
+            addLine(c, "Comentários (${coms.size})", 17f)
+            val box = fieldBox("Escreva um comentário…", true)
+            box.minLines = 2
+            c.addView(box, params().apply { bottomMargin = dp(8) })
+            val send = pill("Comentar") {}
+            send.setOnClickListener {
+                val t = box.text.toString().trim()
+                if (t.isEmpty()) {
+                    toast("Escreva algo.")
+                    return@setOnClickListener
+                }
+                send.isEnabled = false
+                send.text = "Enviando…"
+                async({ Net.postForm("/post/$id", listOf(Pair("content", t)), "text/html").code }, { _ -> postDetail(id) }, { m ->
+                    send.isEnabled = true
+                    send.text = "Comentar"
+                    toast(m)
+                })
+            }
+            c.addView(send, params().apply { bottomMargin = dp(14) })
+            if (coms.isEmpty()) addLine(c, "Ainda não há comentários.", 13f, muted)
+            for (cm in coms) {
+                val k = card()
+                if (cm.depth) (k.layoutParams as LinearLayout.LayoutParams).leftMargin = dp(26)
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                row.gravity = Gravity.CENTER_VERTICAL
+                row.addView(avatarView(cm.avatar, cm.name, 34))
+                val w = LinearLayout(this)
+                w.orientation = LinearLayout.VERTICAL
+                w.setPadding(dp(10), 0, 0, 0)
+                w.addView(nameRow(cm.name, cm.verified, "", 14f))
+                w.addView(text(cm.meta, 11f, muted))
+                row.addView(w)
+                row.setOnClickListener { showProfile(cm.username) }
+                k.addView(row)
+                k.addView(text(cm.text, 14f).apply { setPadding(dp(2), dp(8), dp(2), dp(2)) })
+                c.addView(k)
+            }
+        }, { m -> st.text = "Falha: $m"; st.setTextColor(errorColor) })
     }
 
     private fun renderPosts(c: LinearLayout, posts: List<Post>, more: String?) {
@@ -685,15 +805,37 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showFeed() {
-        val c = screen("Início", "Seu feed", action = pill("＋ Publicar") { newPost() })
+    private fun showFeed(mode: String = "todos") {
+        val c = screen("Início", "Início")
+        val tabs = LinearLayout(this)
+        tabs.orientation = LinearLayout.HORIZONTAL
+        for (pair in listOf(Pair("todos", "Todos"), Pair("seguindo", "Seguindo"))) {
+            val on = pair.first == mode
+            val b = text(pair.second, 14f, Color.WHITE)
+            b.gravity = Gravity.CENTER
+            b.setPadding(dp(18), dp(9), dp(18), dp(9))
+            b.background = rounded(if (on) Color.rgb(60, 12, 20) else Color.rgb(14, 8, 11), 20f)
+            b.setOnClickListener { if (!on) showFeed(pair.first) }
+            tabs.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(8) })
+        }
+        c.addView(tabs, params().apply { bottomMargin = dp(12) })
+        val disc = card()
+        disc.addView(text("Descobrir pessoas e comunidades…", 14f, muted))
+        disc.setOnClickListener { showSearch("") }
+        c.addView(disc)
         val st = text("Carregando publicações…", 14f, muted)
         c.addView(st)
         async({
-            val d = Parse.doc(Net.get("/home").body)
-            Pair(Parse.posts(d), Parse.moreHref(d))
+            val d = Parse.doc(Net.get(if (mode == "seguindo") "/home?feed=seguindo" else "/home").body)
+            try { Frames.ensure() } catch (e: SessionExpired) { throw e } catch (e: Exception) { }
+            Triple(Parse.posts(d), Parse.moreHref(d), Parse.homeMeta(d))
         }, { r ->
             c.removeView(st)
+            val meta = r.third
+            if (meta.me != null) meUser = meta.me
+            if (meta.avatar != null) meAvatar = meta.avatar
+            unreadDot = meta.unread
+            isAdminUser = meta.isAdmin
             if (r.first.isEmpty()) addLine(c, "Nenhuma publicação para mostrar ainda.", 14f, muted)
             else renderPosts(c, r.first, r.second)
         }, { m ->
@@ -1008,7 +1150,7 @@ class MainActivity : Activity() {
         val b = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(13), dp(9), dp(13), dp(9))
-            background = rounded(if (mine) Color.rgb(78, 52, 150) else glass, 18f)
+            background = rounded(if (mine) Color.rgb(120, 18, 32) else glass, 18f)
         }
         if (!mine && who.isNotBlank()) b.addView(text(who, 11f, violet).apply { typeface = Typeface.DEFAULT_BOLD })
         if (body.isNotBlank()) b.addView(text(body, 15f))
@@ -1279,7 +1421,7 @@ class MainActivity : Activity() {
     private fun showProfile(username: String?) {
         val mine = username == null || username == meUser
         val backFn: (() -> Unit)? = if (mine) null else fun() { showFeed() }
-        val c = screen("Perfil", if (mine) "Meu perfil" else "@$username", back = backFn)
+        val c = screen("Mais", if (mine) "Meu perfil" else "@$username", back = backFn)
         val st = text("Carregando perfil…", 14f, muted)
         c.addView(st)
         async({
@@ -1292,7 +1434,7 @@ class MainActivity : Activity() {
             Parse.profile(d, u, u == meUser)
         }, { p ->
             c.removeView(st)
-            val head = card().apply { background = rounded(Color.rgb(36, 27, 58), 26f) }
+            val head = card().apply { background = rounded(Color.rgb(50, 12, 20), 26f) }
             val r1 = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -1340,7 +1482,7 @@ class MainActivity : Activity() {
     }
 
     private fun editProfile() {
-        val c = screen("Perfil", "Editar perfil", back = { showProfile(null) })
+        val c = screen("Mais", "Editar perfil", back = { showProfile(null) })
         val st = text("Carregando…", 14f, muted)
         c.addView(st)
         async({
@@ -1409,5 +1551,87 @@ class MainActivity : Activity() {
             }
             c.addView(save, params())
         }, { m -> st.text = "Falha ao carregar: $m"; st.setTextColor(errorColor) })
+    }
+
+    // ---------- Mais, notificações e servidores ----------
+    private fun showMore() {
+        val c = screen("Mais", "Mais")
+        fun row(title: String, sub: String, go: () -> Unit) {
+            val k = card()
+            k.addView(text(title, 16f).apply { typeface = Typeface.DEFAULT_BOLD })
+            k.addView(text(sub, 12f, muted))
+            k.setOnClickListener { go() }
+            c.addView(k)
+        }
+        row("Meu perfil", "Publicações, insígnias e edição") { showProfile(null) }
+        row("Notificações", "Atividade da sua conta") { showNotifs() }
+        row("Sair da conta", "Encerrar a sessão neste aparelho") { logout() }
+        addLine(c, "Loja, jogos, carteira e painel chegam nas próximas etapas.", 12f, muted)
+    }
+
+    private fun showNotifs() {
+        val c = screen("Mais", "Notificações", back = { showFeed() })
+        val st = text("Carregando…", 14f, muted)
+        c.addView(st)
+        async({ Parse.notifs(Parse.doc(Net.get("/notifications").body)) }, { list ->
+            c.removeView(st)
+            unreadDot = false
+            if (list.isEmpty()) addLine(c, "Nenhuma notificação.", 14f, muted)
+            for (n in list) {
+                val k = card()
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                row.gravity = Gravity.CENTER_VERTICAL
+                if (n.avatar != null) row.addView(avatarView(n.avatar, "?", 38))
+                val t = text(n.text, 14f)
+                t.setPadding(dp(if (n.avatar != null) 10 else 2), dp(2), dp(2), dp(2))
+                row.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                k.addView(row)
+                k.setOnClickListener {
+                    val h = n.href
+                    val pid = Regex("^/post/(\\d+)").find(h)?.groupValues?.get(1)?.toIntOrNull()
+                    when {
+                        pid != null -> postDetail(pid)
+                        h.startsWith("/u/") -> showProfile(h.removePrefix("/u/").substringBefore("/").substringBefore("?"))
+                        h.startsWith("/chat/") -> openChat(h.removePrefix("/chat/").substringBefore("/").substringBefore("?"), "Conversa")
+                    }
+                }
+                c.addView(k)
+            }
+        }, { m -> st.text = "Falha: $m"; st.setTextColor(errorColor) })
+    }
+
+    private fun showServers() {
+        val c = screen("Servidores", "Servidores")
+        val st = text("Carregando…", 14f, muted)
+        c.addView(st)
+        async({ Parse.servers(Parse.doc(Net.get("/servidores").body)) }, { list ->
+            c.removeView(st)
+            addLine(c, "Servidores de Discord parceiros do K.", 13f, muted)
+            if (list.isEmpty()) addLine(c, "Nenhum servidor ainda.", 14f, muted)
+            for (s in list) {
+                val k = card()
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                row.gravity = Gravity.CENTER_VERTICAL
+                row.addView(avatarView(s.icon, s.name, 46))
+                val w = LinearLayout(this)
+                w.orientation = LinearLayout.VERTICAL
+                w.setPadding(dp(12), 0, 0, 0)
+                w.addView(text(s.name, 16f).apply { typeface = Typeface.DEFAULT_BOLD })
+                w.addView(text(s.members, 12f, muted))
+                row.addView(w)
+                k.addView(row)
+                if (s.desc.isNotBlank()) k.addView(text(s.desc, 13f, muted).apply { setPadding(dp(2), dp(8), dp(2), dp(2)) })
+                k.addView(pill("Ver servidor") {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Net.abs(s.href))))
+                    } catch (e: Exception) {
+                        toast("Não foi possível abrir.")
+                    }
+                }, params().apply { topMargin = dp(8) })
+                c.addView(k)
+            }
+        }, { m -> st.text = "Falha: $m"; st.setTextColor(errorColor) })
     }
 }

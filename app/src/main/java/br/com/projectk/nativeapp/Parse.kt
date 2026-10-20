@@ -6,8 +6,18 @@ import org.jsoup.nodes.Element
 
 data class Post(
     val id: Int, val name: String, val username: String, val avatar: String?, val time: String,
-    val text: String, val media: String?, var liked: Boolean, var likes: Int, val comments: String
+    val text: String, val media: String?, var liked: Boolean, var likes: Int, val comments: String,
+    val verified: Boolean = false, val role: String = "", val frame: String? = null
 )
+
+data class Comment(
+    val id: Int, val name: String, val username: String, val avatar: String?, val meta: String,
+    val text: String, val depth: Boolean, val verified: Boolean, val frame: String?
+)
+
+data class Notif(val text: String, val href: String, val avatar: String?)
+data class Server(val href: String, val name: String, val members: String, val desc: String, val icon: String?)
+data class HomeMeta(val me: String?, val avatar: String?, val unread: Boolean, val isAdmin: Boolean)
 
 data class Person(
     val name: String, val username: String, val avatar: String?, val bio: String, var following: Boolean, val showFollow: Boolean
@@ -18,7 +28,9 @@ data class Community(val id: Int, val name: String)
 data class Convo(val username: String, val name: String, val avatar: String?, val preview: String, val time: String, val unread: Int)
 data class Profile(
     val name: String, val username: String, val bio: String, val avatar: String?,
-    val stats: List<Pair<String, String>>, val posts: List<Post>, val following: Boolean, val isMe: Boolean
+    val stats: List<Pair<String, String>>, val posts: List<Post>, val following: Boolean, val isMe: Boolean,
+    val cover: String? = null, val status: String = "", val badges: List<String> = emptyList(),
+    val verified: Boolean = false, val frame: String? = null
 )
 
 object Parse {
@@ -56,11 +68,100 @@ object Parse {
                     src(a.selectFirst("img.k-post__media")),
                     like.hasClass("liked"),
                     a.selectFirst(".like-count")?.text()?.trim()?.toIntOrNull() ?: 0,
-                    comments
+                    comments,
+                    a.selectFirst(".k-post__name .k-verified") != null,
+                    if (a.selectFirst(".k-rtag--admin") != null) "admin" else if (a.selectFirst(".k-rtag--mod") != null) "mod" else "",
+                    frameKey(a.selectFirst(".k-post__author"))
                 )
             )
         }
         return out
+    }
+
+
+    private val SIZES = setOf("xs", "sm", "md", "lg", "xl", "u")
+
+    /** Chave da moldura (k-frame--chave) dentro de um elemento, ignorando as classes de tamanho. */
+    fun frameKey(root: Element?): String? {
+        if (root == null) return null
+        val els = ArrayList<Element>()
+        els.add(root)
+        els.addAll(root.select("[class*='k-frame--']"))
+        for (e in els) {
+            for (c in e.classNames()) {
+                if (c.startsWith("k-frame--")) {
+                    val k = c.removePrefix("k-frame--")
+                    if (k !in SIZES) return k
+                }
+            }
+        }
+        return null
+    }
+
+    fun comments(d: Document): List<Comment> {
+        val out = ArrayList<Comment>()
+        for (a in d.select("article.k-comment")) {
+            val id = a.id().removePrefix("c").toIntOrNull() ?: continue
+            val nameEl = a.selectFirst(".k-comment__name")
+            val meta = a.selectFirst(".k-comment__meta")?.text().orEmpty()
+            out.add(
+                Comment(
+                    id,
+                    nameEl?.selectFirst("span")?.ownText()?.trim().orEmpty().ifBlank { nameEl?.text().orEmpty() },
+                    meta.substringBefore(" ").removePrefix("@"),
+                    src(a.selectFirst("img")),
+                    meta,
+                    a.selectFirst(".k-comment__text")?.text().orEmpty(),
+                    a.attr("style").contains("margin-left"),
+                    a.selectFirst(".k-verified") != null,
+                    frameKey(a)
+                )
+            )
+        }
+        return out
+    }
+
+    fun notifs(d: Document): List<Notif> {
+        val out = ArrayList<Notif>()
+        for (e in d.select("section.notifications-card:not(.k-updates) .notification-item")) {
+            val href = if (e.tagName() == "a") e.attr("href") else e.selectFirst("a[href]")?.attr("href").orEmpty()
+            val t = e.text().trim()
+            if (t.isNotBlank()) out.add(Notif(t, href, src(e.selectFirst("img"))))
+        }
+        return out
+    }
+
+    fun servers(d: Document): List<Server> {
+        val out = ArrayList<Server>()
+        for (a in d.select("a.sv-card")) {
+            val smalls = a.select("small")
+            out.add(
+                Server(
+                    a.attr("href"), a.selectFirst("b")?.text().orEmpty(),
+                    smalls.firstOrNull()?.text().orEmpty(), if (smalls.size > 1) smalls[1].text() else "",
+                    src(a.selectFirst("img.sv-ic"))
+                )
+            )
+        }
+        return out
+    }
+
+    fun homeRooms(d: Document): List<Room> {
+        val out = ArrayList<Room>()
+        for (a in d.select("a.hr-card")) {
+            val id = a.attr("href").trimEnd('/').substringAfterLast("/").toIntOrNull() ?: continue
+            out.add(Room(id, a.selectFirst("b")?.text().orEmpty(), a.selectFirst("small")?.text().orEmpty(), "", src(a.selectFirst("img.hr-ic"))))
+        }
+        return out
+    }
+
+    fun homeMeta(d: Document): HomeMeta {
+        val me = meUsername(d)
+        var av: String? = null
+        if (me != null) {
+            av = src(d.selectFirst("a[href='/u/$me'] img"))
+        }
+        return HomeMeta(me, av, d.selectFirst(".notification-dot") != null, d.selectFirst("a[href='/admin']") != null)
     }
 
     fun moreHref(d: Document): String? {
@@ -153,11 +254,24 @@ object Parse {
         val name = (h1?.ownText()?.trim().orEmpty()).ifBlank { h1?.text().orEmpty() }.ifBlank { username }
         val stats = d.select(".z-stat").map { Pair(it.selectFirst("span")?.text().orEmpty(), it.selectFirst("strong")?.text().orEmpty()) }
         val btn = d.selectFirst("[data-following]")
+        val coverStyle = d.selectFirst(".z-profile-cover")?.attr("style").orEmpty()
+        val cover = Regex("""url\(['"]?([^'")]+)['"]?\)""").find(coverStyle)?.groupValues?.get(1)
+        val badges = ArrayList<String>()
+        for (b in d.select(".k-badgebar .kbtn svg")) {
+            var x = b.outerHtml()
+            if (!x.contains("xmlns")) x = x.replaceFirst("<svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"")
+            badges.add(x)
+        }
         return Profile(
             name, username,
             d.selectFirst(".z-profile-bio")?.text().orEmpty(),
             src(d.selectFirst(".z-profile-avatar-wrap img")),
-            stats, posts(d), btn?.attr("data-following") == "true", isMe
+            stats, posts(d), btn?.attr("data-following") == "true", isMe,
+            Net.abs(cover),
+            d.selectFirst(".pst-b span")?.text().orEmpty(),
+            badges,
+            d.selectFirst(".z-profile-name-row .z-verified") != null,
+            frameKey(d.selectFirst(".z-profile-avatar-wrap"))
         )
     }
 
