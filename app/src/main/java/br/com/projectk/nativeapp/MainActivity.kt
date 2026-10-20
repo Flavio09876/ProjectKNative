@@ -518,6 +518,20 @@ class MainActivity : Activity() {
             return base
         }
         val fw = Math.max(3, (sizeDp * 0.0625f).toInt())
+        val ukey = Regex("uf-\\d+").find(frame)?.value
+        val uf = Frames.get(ukey)
+        if (uf != null) {
+            val ovd = (sizeDp * (1f + 2f * uf.inset / 100f)).toInt()
+            val bx = FrameLayout(this)
+            bx.clipChildren = false
+            bx.addView(base, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
+            val oi = ImageView(this)
+            oi.scaleType = ImageView.ScaleType.FIT_CENTER
+            Img.load(uf.url, oi, 512)
+            bx.addView(oi, FrameLayout.LayoutParams(dp(ovd), dp(ovd), Gravity.CENTER))
+            bx.layoutParams = LinearLayout.LayoutParams(dp(ovd), dp(ovd))
+            return bx
+        }
         val tot = sizeDp + fw * 2
         val box = FrameLayout(this)
         box.clipChildren = false
@@ -1529,7 +1543,7 @@ class MainActivity : Activity() {
             val r1 = LinearLayout(this)
             r1.orientation = LinearLayout.HORIZONTAL
             r1.gravity = Gravity.CENTER_VERTICAL
-            val live = if (p.frame != null || Frames.profileHtml?.contains("k-frame") == true) Frames.liveView(this, 150) else null
+            val live = if (Frames.get(Regex("uf-\\d+").find(p.frame ?: "")?.value) == null && (p.frame != null || Frames.profileHtml?.contains("k-frame") == true)) Frames.liveView(this, 150) else null
             if (live != null) r1.addView(live, LinearLayout.LayoutParams(dp(150), dp(150))) else r1.addView(avatarView(p.avatar, p.name, 76, p.frame))
             val nm = LinearLayout(this)
             nm.orientation = LinearLayout.VERTICAL

@@ -38,7 +38,7 @@ object Parse {
     @Volatile var cssLinks: List<String> = emptyList()
     @Volatile var styles: String = ""
 
-    fun doc(html: String): Document = Jsoup.parse(html, Net.BASE).also { Frames.feed(it); Frames.addCss(it) }
+    fun doc(html: String): Document = Jsoup.parse(html, Net.BASE).also { Frames.feedRaw(html); Frames.feed(it); Frames.addCss(it) }
 
     private fun src(e: Element?): String? {
         if (e == null) return null

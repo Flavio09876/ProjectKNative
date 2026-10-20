@@ -80,6 +80,18 @@ object Frames {
         } catch (e: Throwable) {}
     }
 
+    fun feedRaw(html: String) {
+        try {
+            if (!html.contains("uf-")) return
+            val rx = Regex("""\.(uf-\d+)::after\s*\{([^}]*)\}""")
+            for (m in rx.findAll(html)) {
+                val u = Regex("""url\(\s*["']?([^"')\s]+)""").find(m.groupValues[2])?.groupValues?.get(1) ?: continue
+                val ins = Regex("""inset:\s*(-?[0-9.]+)%""").find(m.groupValues[2])?.groupValues?.get(1)?.toFloatOrNull()
+                user[m.groupValues[1]] = F(Net.abs(u) ?: u, if (ins != null) Math.abs(ins) else 20f)
+            }
+        } catch (e: Throwable) {}
+    }
+
     fun get(key: String?): F? = if (key == null) null else (user[key] ?: map?.get(key))
 
     // ---- Renderização fiel: o CSS real do site num WebView fora da tela, capturado como imagem ----
