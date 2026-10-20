@@ -194,7 +194,10 @@ object Frames {
         wv.setBackgroundColor(0)
         wv.isVerticalScrollBarEnabled = false
         wv.isHorizontalScrollBarEnabled = false
-        val css = synchronized(custom) { custom.joinToString("") }
+        var css = synchronized(custom) { custom.joinToString("") }
+        val uk = Regex("uf-\\d+").find(inner)?.value
+        val uf = if (uk != null) user[uk] else null
+        if (uk != null && uf != null) css += ".$uk::after{content:'';position:absolute;border-radius:0;z-index:3;inset:-" + uf.inset + "%;background:url(" + uf.url + ") center/contain no-repeat}"
         val lk = links.joinToString("") { "<link rel='stylesheet' href='" + it + "'>" }
         val html = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>" + lk +
             "<style>" + css + "html,body{margin:0;height:100%;background:transparent!important;overflow:hidden}" +
