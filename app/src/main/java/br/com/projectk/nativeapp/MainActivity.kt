@@ -70,6 +70,7 @@ class MainActivity : Activity() {
     private var pickedLabel: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Img.init(applicationContext)
         super.onCreate(savedInstanceState)
 
         window.statusBarColor = bg
@@ -238,23 +239,26 @@ class MainActivity : Activity() {
     private fun showLogin() {
         makeRoot()
 
-        root.addView(label("K", 54f).apply {
-            setTextColor(red)
+        addSpace(30)
+        val tile = TextView(this)
+        tile.text = "K"
+        tile.textSize = 40f
+        tile.gravity = Gravity.CENTER
+        tile.setTextColor(Color.WHITE)
+        tile.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        tile.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(225, 29, 46), Color.rgb(120, 10, 25))).apply { cornerRadius = dp(22).toFloat() }
+        root.addView(tile, LinearLayout.LayoutParams(dp(84), dp(84)).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        addSpace(16)
+        root.addView(label("Project K", 26f).apply {
             gravity = Gravity.CENTER
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }, params())
-
-        root.addView(label("PROJECT K", 23f).apply {
+        root.addView(label("Entre para continuar", 14f).apply {
             gravity = Gravity.CENTER
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(169, 154, 157))
         }, params())
 
-        root.addView(label("Entre na sua conta", 14f).apply {
-            gravity = Gravity.CENTER
-            setTextColor(Color.LTGRAY)
-        }, params())
-
-        addSpace(36)
+        addSpace(28)
 
         root.addView(label("Usuário ou e-mail", 14f), params())
         addSpace(8)
@@ -269,17 +273,12 @@ class MainActivity : Activity() {
         root.addView(loginButton, params())
 
         addSpace(16)
-        status = label("Conexão com o servidor: $baseUrl", 12f).apply {
+        status = label("", 13f).apply {
             setTextColor(Color.LTGRAY)
             gravity = Gravity.CENTER
         }
         root.addView(status, params())
 
-        addSpace(18)
-        root.addView(label("Aplicativo nativo em desenvolvimento", 12f).apply {
-            gravity = Gravity.CENTER
-            setTextColor(Color.GRAY)
-        }, params())
     }
 
     private fun login() {
@@ -441,6 +440,54 @@ class MainActivity : Activity() {
         }
     }
 
+    private class Skel(c: android.content.Context) : LinearLayout(c) {
+        var text: CharSequence = ""
+            set(v) {
+                field = v
+                removeAllViews()
+                alpha = 1f
+                val t = TextView(context)
+                t.text = v
+                t.textSize = 14f
+                t.setTextColor(Color.rgb(255, 120, 120))
+                addView(t)
+            }
+        fun setTextColor(col: Int) {}
+    }
+
+    private fun skeleton(): Skel {
+        val box = Skel(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(4), dp(8), dp(4), dp(8))
+        for (i in 0 until 4) {
+            val r = LinearLayout(this)
+            r.orientation = LinearLayout.HORIZONTAL
+            r.setPadding(0, dp(10), 0, dp(10))
+            val av = View(this)
+            av.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.rgb(34, 16, 20)) }
+            r.addView(av, LinearLayout.LayoutParams(dp(40), dp(40)))
+            val col = LinearLayout(this)
+            col.orientation = LinearLayout.VERTICAL
+            for (w in intArrayOf(140, 260, 200)) {
+                val bar = View(this)
+                bar.background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(Color.rgb(34, 16, 20)) }
+                col.addView(bar, LinearLayout.LayoutParams(dp(w), dp(10)).apply { topMargin = dp(7) })
+            }
+            r.addView(col, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(12) })
+            box.addView(r)
+        }
+        val a = android.animation.ObjectAnimator.ofFloat(box, "alpha", 0.35f, 1f)
+        a.duration = 750
+        a.repeatMode = android.animation.ValueAnimator.REVERSE
+        a.repeatCount = android.animation.ValueAnimator.INFINITE
+        a.start()
+        box.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {}
+            override fun onViewDetachedFromWindow(v: View) { a.cancel() }
+        })
+        return box
+    }
+
     private fun avatarView(url: String?, name: String, sizeDp: Int, frame: String? = null): View {
         val round = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
@@ -482,16 +529,30 @@ class MainActivity : Activity() {
             box.layoutParams = LinearLayout.LayoutParams(dp(ov), dp(ov))
             return box
         }
+        val cs = Frames.colorsOf(frame) ?: intArrayOf(violet, Color.rgb(255, 154, 31), violet)
+        val tot = sizeDp + 8
         val box = FrameLayout(this)
-        box.addView(base, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
         val ring = View(this)
         val g = GradientDrawable()
         g.shape = GradientDrawable.OVAL
         g.setColor(Color.TRANSPARENT)
-        g.setStroke(dp(2), violet)
-        ring.background = g
-        box.addView(ring, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
-        box.layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+        g.setStroke(dp(3), cs[0])
+        try {
+            if (cs.size > 1) {
+                g.gradientType = GradientDrawable.SWEEP_GRADIENT
+                g.colors = cs + cs[0]
+            }
+        } catch (e: Throwable) {}
+        ring.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            if (cs.size > 1) { colors = cs + cs[0]; gradientType = GradientDrawable.SWEEP_GRADIENT } else setColor(cs[0])
+        }
+        box.addView(ring, FrameLayout.LayoutParams(dp(tot), dp(tot), Gravity.CENTER))
+        val hole = View(this)
+        hole.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.rgb(7, 5, 10)) }
+        box.addView(hole, FrameLayout.LayoutParams(dp(sizeDp + 3), dp(sizeDp + 3), Gravity.CENTER))
+        box.addView(base, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
+        box.layoutParams = LinearLayout.LayoutParams(dp(tot), dp(tot))
         return box
     }
 
@@ -759,7 +820,7 @@ class MainActivity : Activity() {
 
     private fun postDetail(id: Int) {
         val c = screen("Início", "Publicação", back = { showFeed() })
-        val st = text("Carregando…", 14f, muted)
+        val st = skeleton()
         c.addView(st)
         async({ try { Frames.ensure() } catch (e: SessionExpired) { throw e } catch (e: Exception) { }; Parse.doc(Net.get("/post/$id").body) }, { d ->
             c.removeView(st)
@@ -844,7 +905,7 @@ class MainActivity : Activity() {
         disc.addView(text("Descobrir pessoas e comunidades…", 14f, muted))
         disc.setOnClickListener { showSearch("") }
         c.addView(disc)
-        val st = text("Carregando publicações…", 14f, muted)
+        val st = skeleton()
         c.addView(st)
         async({
             val d = Parse.doc(Net.get(if (mode == "seguindo") "/home?feed=seguindo" else "/home").body)
@@ -1010,7 +1071,7 @@ class MainActivity : Activity() {
         go.setOnClickListener { run() }
         input.setOnEditorActionListener { _, _, _ -> run(); true }
 
-        val st = text(if (q.isBlank()) "Carregando…" else "Buscando…", 14f, muted)
+        val st = skeleton()
         c.addView(st)
         if (q.isBlank()) {
             async({
@@ -1099,7 +1160,7 @@ class MainActivity : Activity() {
 
     private fun showRooms() {
         val c = screen("Salas", "Salas e comunidades")
-        val st = text("Carregando salas…", 14f, muted)
+        val st = skeleton()
         c.addView(st)
         async({
             val rooms = Parse.rooms(Parse.doc(Net.get("/salas").body))
@@ -1119,7 +1180,7 @@ class MainActivity : Activity() {
 
     private fun openCommunity(cm: Community) {
         val c = screen("Salas", cm.name, back = { showRooms() })
-        val st = text("Carregando…", 14f, muted)
+        val st = skeleton()
         c.addView(st)
         async({ Parse.doc(Net.get("/community/${cm.id}").body) }, { d ->
             c.removeView(st)
@@ -1312,7 +1373,7 @@ class MainActivity : Activity() {
     // ---------- Chat ----------
     private fun showChats() {
         val c = screen("Chat", "Mensagens")
-        val st = text("Carregando conversas…", 14f, muted)
+        val st = skeleton()
         c.addView(st)
         async({ Parse.convos(Parse.doc(Net.get("/chat").body)) }, { list ->
             c.removeView(st)
@@ -1443,7 +1504,7 @@ class MainActivity : Activity() {
         val mine = username == null || username == meUser
         val backFn: (() -> Unit)? = if (mine) null else fun() { showFeed() }
         val c = screen("Mais", if (mine) "Meu perfil" else "@$username", back = backFn)
-        val st = text("Carregando perfil…", 14f, muted)
+        val st = skeleton()
         c.addView(st)
         async({
             var u = username ?: meUser
@@ -1528,7 +1589,7 @@ class MainActivity : Activity() {
 
     private fun editProfile() {
         val c = screen("Mais", "Editar perfil", back = { showProfile(null) })
-        val st = text("Carregando…", 14f, muted)
+        val st = skeleton()
         c.addView(st)
         async({
             val d = Parse.doc(Net.get("/settings/profile").body)
@@ -1616,7 +1677,7 @@ class MainActivity : Activity() {
 
     private fun showNotifs() {
         val c = screen("Mais", "Notificações", back = { showFeed() })
-        val st = text("Carregando…", 14f, muted)
+        val st = skeleton()
         c.addView(st)
         async({ Parse.notifs(Parse.doc(Net.get("/notifications").body)) }, { list ->
             c.removeView(st)
@@ -1648,7 +1709,7 @@ class MainActivity : Activity() {
 
     private fun showServers() {
         val c = screen("Servidores", "Servidores")
-        val st = text("Carregando…", 14f, muted)
+        val st = skeleton()
         c.addView(st)
         async({ Parse.servers(Parse.doc(Net.get("/servidores").body)) }, { list ->
             c.removeView(st)

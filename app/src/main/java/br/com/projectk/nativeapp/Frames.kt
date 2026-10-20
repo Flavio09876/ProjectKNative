@@ -6,6 +6,9 @@ object Frames {
 
     private var map: Map<String, F>? = null
 
+    private var colors: Map<String, IntArray> = HashMap()
+    fun colorsOf(key: String?): IntArray? = if (key == null) null else colors[key]
+
     fun ensure() {
         if (map != null) return
         val out = HashMap<String, F>()
@@ -22,6 +25,16 @@ object Frames {
                 urlRx.find(body)?.let { urls[key] = it.groupValues[1] }
                 insetRx.find(body)?.let { insets[key] = Math.abs(it.groupValues[1].toFloat()) }
             }
+            val cm = HashMap<String, IntArray>()
+            val bef = Regex("""\.k-frame--([a-z0-9_]+)::before\s*\{([^}]*)\}""")
+            val hex = Regex("""#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b""")
+            for (m in bef.findAll(css)) {
+                val cs = hex.findAll(m.groupValues[2]).mapNotNull {
+                    try { android.graphics.Color.parseColor("#" + it.groupValues[1]) } catch (e: Exception) { null }
+                }.toList()
+                if (cs.isNotEmpty()) cm[m.groupValues[1]] = cs.toIntArray()
+            }
+            colors = cm
             for ((k, u) in urls) {
                 if (u.contains("/static/img/frames/")) out[k] = F(Net.abs(u) ?: u, insets[k] ?: 25f)
             }
@@ -29,7 +42,7 @@ object Frames {
             throw e
         } catch (e: Exception) {
         }
-        map = out
+        if (out.isNotEmpty() || colors.isNotEmpty()) map = out
     }
 
     fun get(key: String?): F? = if (key == null) null else map?.get(key)

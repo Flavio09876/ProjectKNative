@@ -12,7 +12,7 @@ object Img {
     private val cache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
-    private val pool = Executors.newFixedThreadPool(4)
+    private val pool = Executors.newFixedThreadPool(8)
 
     fun svgToBitmap(svgText: String, px: Int): Bitmap? {
         return try {
@@ -58,6 +58,36 @@ object Img {
         return BitmapFactory.decodeByteArray(data, 0, data.size, o2)
     }
 
+    private val pending = HashMap<String, ArrayList<(Bitmap?) -> Unit>>()
+    private var dir: java.io.File? = null
+
+    fun init(ctx: android.content.Context) {
+        dir = java.io.File(ctx.cacheDir, "img").apply { mkdirs() }
+    }
+
+    private fun fileFor(url: String): java.io.File? =
+        dir?.let { java.io.File(it, Integer.toHexString(url.hashCode()) + "_" + url.length) }
+
+    private fun fetch(url: String): ByteArray? {
+        val f = fileFor(url)
+        if (f != null && f.exists() && f.length() > 0) {
+            try { return f.readBytes() } catch (e: Throwable) {}
+        }
+        var delay = 400L
+        for (i in 0 until 3) {
+            try {
+                val b = Net.bytes(url)
+                if (b != null && b.isNotEmpty()) {
+                    try { f?.writeBytes(b) } catch (e: Throwable) {}
+                    return b
+                }
+            } catch (e: Throwable) {}
+            try { Thread.sleep(delay) } catch (e: Throwable) {}
+            delay *= 2
+        }
+        return null
+    }
+
     fun load(url: String?, view: ImageView, maxW: Int = 1080) {
         view.tag = url
         view.setImageDrawable(null)
@@ -68,17 +98,30 @@ object Img {
             view.setImageBitmap(hit)
             return
         }
+        val cb: (Bitmap?) -> Unit = { bmp ->
+            view.post {
+                if (view.tag == url && bmp != null) {
+                    view.alpha = 0f
+                    view.setImageBitmap(bmp)
+                    view.animate().alpha(1f).setDuration(180).start()
+                }
+            }
+        }
+        synchronized(pending) {
+            val l = pending[key]
+            if (l != null) { l.add(cb); return }
+            pending[key] = arrayListOf(cb)
+        }
         pool.execute {
             val bmp = try {
-                val b = Net.bytes(url)
+                val b = fetch(url)
                 if (b == null) null else decode(b, maxW)
             } catch (e: Throwable) {
                 null
             }
-            if (bmp != null) {
-                cache.put(key, bmp)
-                view.post { if (view.tag == url) view.setImageBitmap(bmp) }
-            }
+            if (bmp != null) cache.put(key, bmp)
+            val ls = synchronized(pending) { pending.remove(key) }
+            ls?.forEach { it(bmp) }
         }
     }
 

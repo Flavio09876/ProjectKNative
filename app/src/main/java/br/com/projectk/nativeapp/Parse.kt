@@ -259,6 +259,8 @@ object Parse {
         val badges = ArrayList<String>()
         for (b in d.select(".k-badgebar .kbtn svg")) {
             var x = b.outerHtml()
+            try { x = org.jsoup.Jsoup.parse(x, "", org.jsoup.parser.Parser.xmlParser()).outerHtml() } catch (e: Exception) {}
+            x = x.replace(Regex("^<\\?xml[^>]*>\\s*"), "")
             if (!x.contains("xmlns")) x = x.replaceFirst("<svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"")
             badges.add(x)
         }
@@ -284,7 +286,7 @@ object Parse {
 
     /** Campos atuais de um formulário (para reenviar tudo igual, mudando só o que o usuário editou). */
     fun formFields(d: Document, actionPart: String): List<Pair<String, String>> {
-        val f = d.selectFirst("form[action*='$actionPart']") ?: return emptyList()
+        val f = (d.selectFirst("form[action*='$actionPart']") ?: d.selectFirst("textarea[name=bio]")?.closest("form") ?: d.select("form[method~=(?i)post]").firstOrNull { it.selectFirst("[name=name]") != null }) ?: return emptyList()
         val out = ArrayList<Pair<String, String>>()
         for (i in f.select("input[name]")) {
             val type = i.attr("type").lowercase()
