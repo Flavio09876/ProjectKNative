@@ -1892,24 +1892,57 @@ class MainActivity : Activity() {
 
     private fun showMore() {
         val c = screen("Mais", "Mais")
-        fun row(title: String, sub: String, go: () -> Unit) {
-            val k = card()
-            k.addView(text(title, 16f).apply { typeface = Typeface.DEFAULT_BOLD })
-            k.addView(text(sub, 12f, muted))
-            k.setOnClickListener { go() }
-            c.addView(k)
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.VERTICAL
+        head.gravity = Gravity.CENTER_HORIZONTAL
+        head.setPadding(0, dp(6), 0, dp(14))
+        head.addView(avatarView(meAvatar, meUser ?: "K", 84))
+        head.addView(text(meUser ?: "", 20f).apply { typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER; setPadding(0, dp(10), 0, 0) })
+        head.addView(text("Toque para ver seu perfil", 12f, muted).apply { gravity = Gravity.CENTER })
+        head.setOnClickListener { showProfile(null) }
+        c.addView(head, params())
+
+        fun group(vararg items: Triple<String, Pair<Int, Int>, () -> Unit>) {
+            val g = LinearLayout(this)
+            g.orientation = LinearLayout.VERTICAL
+            g.background = GradientDrawable().apply { setColor(Color.rgb(24, 12, 16)); cornerRadius = dp(20).toFloat() }
+            items.forEachIndexed { i, it ->
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                row.gravity = Gravity.CENTER_VERTICAL
+                row.setPadding(dp(14), dp(12), dp(14), dp(12))
+                val tile = FrameLayout(this)
+                tile.background = GradientDrawable().apply { setColor(it.second.second); cornerRadius = dp(9).toFloat() }
+                tile.addView(icon(it.second.first, Color.WHITE, 20), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+                row.addView(tile, LinearLayout.LayoutParams(dp(34), dp(34)))
+                row.addView(text(it.first, 16f).apply { setPadding(dp(14), 0, 0, 0) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                row.addView(text("›", 22f, muted))
+                row.setOnClickListener { _ -> it.third() }
+                g.addView(row)
+                if (i < items.size - 1) g.addView(View(this).apply { setBackgroundColor(Color.argb(40, 255, 255, 255)) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(62) })
+            }
+            c.addView(g, params().apply { bottomMargin = dp(14) })
         }
-        row("Meu perfil", "Publicações, insígnias e edição") { showProfile(null) }
-        row("Notificações", "Atividade da sua conta") { showNotifs() }
-        row("Loja", "Molduras, efeitos e criações") { showWebPage("Loja", "/loja") }
-        row("Jogos", "Cassino, minas, cobrinha e mais") { showWebPage("Jogos", "/jogos") }
-        row("Carteira", "K-coins, pontos e cristais") { showWebPage("Carteira", "/carteira") }
-        row("Conquistas", "Insígnias e progresso") { showWebPage("Conquistas", "/conquistas") }
-        row("Tarefas", "Missões e recompensas") { showWebPage("Tarefas", "/tarefas") }
-        row("Configurações", "Conta e preferências") { showWebPage("Configurações", "/settings") }
-        if (isAdminUser) row("Painel admin", "Administração do site") { showWebPage("Painel admin", "/admin") }
-        row("Verificar atualização", "Versão instalada: " + try { packageManager.getPackageInfo(packageName, 0).versionCode } catch (e: Throwable) { 0 }) { checkUpdate(true) }
-        row("Sair da conta", "Encerrar a sessão neste aparelho") { logout() }
+        val green = Color.rgb(52, 168, 83); val red = Color.rgb(225, 29, 46); val blue = Color.rgb(66, 133, 244)
+        val orange = Color.rgb(245, 124, 0); val yellow = Color.rgb(212, 160, 0); val pink = Color.rgb(214, 51, 132); val gray = Color.rgb(110, 110, 120)
+        group(
+            Triple("Meu perfil", Pair(R.drawable.ic_people, red)) { showProfile(null) },
+            Triple("Notificações", Pair(R.drawable.ic_bell, orange)) { showNotifs() },
+            Triple("Conquistas", Pair(R.drawable.ic_crown, yellow)) { showWebPage("Conquistas", "/conquistas") },
+            Triple("Tarefas", Pair(R.drawable.ic_seal, green)) { showWebPage("Tarefas", "/tarefas") }
+        )
+        group(
+            Triple("Loja", Pair(R.drawable.ic_crown, pink)) { showWebPage("Loja", "/loja") },
+            Triple("Carteira", Pair(R.drawable.ic_seal, blue)) { showWebPage("Carteira", "/carteira") },
+            Triple("Jogos", Pair(R.drawable.ic_apps, green)) { showWebPage("Jogos", "/jogos") }
+        )
+        val last = ArrayList<Triple<String, Pair<Int, Int>, () -> Unit>>()
+        last.add(Triple("Configurações", Pair(R.drawable.ic_shield, gray)) { showWebPage("Configurações", "/settings") })
+        if (isAdminUser) last.add(Triple("Painel admin", Pair(R.drawable.ic_shield, red)) { showWebPage("Painel admin", "/admin") })
+        last.add(Triple("Atualização do app", Pair(R.drawable.ic_dns, blue)) { checkUpdate(true) })
+        last.add(Triple("Sair da conta", Pair(R.drawable.ic_plus, red)) { logout() })
+        group(*last.toTypedArray())
+        addLine(c, "Versão " + try { packageManager.getPackageInfo(packageName, 0).versionCode } catch (e: Throwable) { 0 }, 12f, muted)
     }
 
     private fun showNotifs() {
