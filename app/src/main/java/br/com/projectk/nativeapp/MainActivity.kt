@@ -1718,6 +1718,35 @@ class MainActivity : Activity() {
     }
 
     // ---------- Mais, notificações e servidores ----------
+    private fun showUpdateDialog(latest: Int, cur: Int) {
+        val dlg = android.app.Dialog(this)
+        dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(22), dp(24), dp(22), dp(18))
+        box.background = GradientDrawable().apply {
+            setColor(Color.rgb(24, 9, 14)); cornerRadius = dp(26).toFloat(); setStroke(dp(1), Color.argb(140, 225, 29, 46))
+        }
+        val tile = TextView(this)
+        tile.text = "K"; tile.textSize = 26f; tile.gravity = Gravity.CENTER
+        tile.setTextColor(Color.WHITE); tile.typeface = Typeface.DEFAULT_BOLD
+        tile.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(225, 29, 46), Color.rgb(120, 10, 25))).apply { cornerRadius = dp(16).toFloat() }
+        box.addView(tile, LinearLayout.LayoutParams(dp(56), dp(56)).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        box.addView(text("Nova versão disponível", 20f).apply { typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER; setPadding(0, dp(14), 0, dp(4)) })
+        box.addView(text("Versão $latest pronta para instalar.\nVocê está na $cur.", 14f, muted).apply { gravity = Gravity.CENTER })
+        val yes = pill("Atualizar agora") {
+            dlg.dismiss()
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/Flavio09876/ProjectKNative/releases/download/apk-latest/ProjectK-debug.apk")))
+        }
+        box.addView(yes, params().apply { topMargin = dp(18) })
+        val no = text("Agora não", 14f, muted).apply { gravity = Gravity.CENTER; setPadding(0, dp(14), 0, dp(2)); setOnClickListener { dlg.dismiss() } }
+        box.addView(no)
+        dlg.setContentView(box)
+        dlg.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.88f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+        dlg.show()
+    }
+
     private var updateChecked = false
 
     private fun checkUpdate(manual: Boolean) {
@@ -1733,13 +1762,7 @@ class MainActivity : Activity() {
                 val cur = packageManager.getPackageInfo(packageName, 0).versionCode
                 runOnUiThread {
                     if (latest > cur) {
-                        android.app.AlertDialog.Builder(this)
-                            .setTitle("Nova versão disponível")
-                            .setMessage("Versão $latest disponível (a sua é $cur). Baixar e instalar agora?")
-                            .setPositiveButton("Atualizar") { _, _ ->
-                                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/Flavio09876/ProjectKNative/releases/download/apk-latest/ProjectK-debug.apk")))
-                            }
-                            .setNegativeButton("Depois", null).show()
+                        showUpdateDialog(latest, cur)
                     } else if (manual) Toast.makeText(this, "Você já está na versão mais recente ($cur).", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Throwable) {
