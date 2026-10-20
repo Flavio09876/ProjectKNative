@@ -1522,7 +1522,11 @@ class MainActivity : Activity() {
                 cv.scaleType = ImageView.ScaleType.CENTER_CROP
                 cv.setBackgroundColor(Color.rgb(42, 12, 17))
                 cv.layoutParams = params().apply { bottomMargin = dp(8) }
-                (cv.layoutParams as LinearLayout.LayoutParams).height = dp(130)
+                (cv.layoutParams as LinearLayout.LayoutParams).height = dp(150)
+                cv.outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, dp(26).toFloat()) }
+                }
+                cv.clipToOutline = true
                 Img.load(p.cover, cv, 1080)
                 c.addView(cv)
             }
@@ -1530,14 +1534,16 @@ class MainActivity : Activity() {
             val r1 = LinearLayout(this)
             r1.orientation = LinearLayout.HORIZONTAL
             r1.gravity = Gravity.CENTER_VERTICAL
-            r1.addView(avatarView(p.avatar, p.name, 64, p.frame))
+            r1.clipChildren = false
+            head.clipChildren = false
+            r1.addView(avatarView(p.avatar, p.name, 76, p.frame))
             val nm = LinearLayout(this)
             nm.orientation = LinearLayout.VERTICAL
             nm.setPadding(dp(14), 0, 0, 0)
             nm.addView(nameRow(p.name, p.verified, p.role, 21f))
             nm.addView(text("@${p.username}", 13f, muted))
             r1.addView(nm)
-            head.addView(r1)
+            if (p.cover != null) head.addView(r1, LinearLayout.LayoutParams(-1, -2).apply { topMargin = -dp(40) }) else head.addView(r1)
             if (p.status.isNotBlank()) head.addView(text("● ${p.status}", 13f, violet).apply { setPadding(dp(2), dp(10), dp(2), dp(2)) })
             if (p.badges.isNotEmpty()) {
                 val hs = android.widget.HorizontalScrollView(this)

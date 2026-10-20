@@ -34,7 +34,7 @@ data class Profile(
 )
 
 object Parse {
-    fun doc(html: String): Document = Jsoup.parse(html, Net.BASE)
+    fun doc(html: String): Document = Jsoup.parse(html, Net.BASE).also { Frames.feed(it) }
 
     private fun src(e: Element?): String? {
         if (e == null) return null
@@ -88,7 +88,10 @@ object Parse {
         els.add(root)
         els.addAll(root.select("[class*='k-frame--']"))
         for (e in els) {
-            for (c in e.classNames()) {
+            val cn = e.classNames()
+            cn.firstOrNull { it.matches(Regex("uf-\\d+")) }?.let { return it }
+            cn.firstOrNull { it.startsWith("cx-") }?.let { if (cn.contains("k-frame--c") || cn.any { x -> x.startsWith("k-frame--c-") }) return it }
+            for (c in cn) {
                 if (c.startsWith("k-frame--")) {
                     val k = c.removePrefix("k-frame--")
                     if (k !in SIZES) return k
