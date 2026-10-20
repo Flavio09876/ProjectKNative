@@ -36,16 +36,23 @@ object Img {
         }
     }
 
+    private fun isRaster(d: ByteArray): Boolean {
+        if (d.size < 4) return false
+        val b0 = d[0].toInt() and 0xFF
+        val b1 = d[1].toInt() and 0xFF
+        return (b0 == 0x89 && b1 == 0x50) || (b0 == 0xFF && b1 == 0xD8) || (b0 == 0x47 && b1 == 0x49) || (b0 == 0x52 && b1 == 0x49)
+    }
+
     private fun decode(data: ByteArray, maxW: Int): Bitmap? {
-        val head = String(data, 0, Math.min(200, data.size), Charsets.UTF_8)
-        if (head.contains("<svg") || head.contains("<?xml")) {
-            return svgToBitmap(String(data, Charsets.UTF_8), maxW)
+        if (!isRaster(data)) {
+            val txt = String(data, Charsets.UTF_8)
+            if (txt.contains("<svg")) return svgToBitmap(txt, maxW)
         }
         val o = BitmapFactory.Options()
         o.inJustDecodeBounds = true
         BitmapFactory.decodeByteArray(data, 0, data.size, o)
         var sample = 1
-        while (o.outWidth / (sample * 2) >= maxW) sample *= 2
+        while (o.outWidth > 0 && o.outWidth / (sample * 2) >= maxW) sample *= 2
         val o2 = BitmapFactory.Options()
         o2.inSampleSize = sample
         return BitmapFactory.decodeByteArray(data, 0, data.size, o2)

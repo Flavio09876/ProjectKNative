@@ -441,33 +441,58 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun avatarView(url: String?, name: String, sizeDp: Int): View {
-        val lp = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+    private fun avatarView(url: String?, name: String, sizeDp: Int, frame: String? = null): View {
         val round = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
                 outline.setOval(0, 0, view.width, view.height)
             }
         }
+        val base: View
         if (url != null) {
             val iv = ImageView(this)
             iv.scaleType = ImageView.ScaleType.CENTER_CROP
             iv.setBackgroundColor(Color.rgb(42, 12, 17))
-            iv.outlineProvider = round
-            iv.clipToOutline = true
-            iv.layoutParams = lp
             Img.load(url, iv, 256)
-            return iv
+            base = iv
+        } else {
+            val tv = TextView(this)
+            tv.text = (name.trim().firstOrNull() ?: '?').uppercaseChar().toString()
+            tv.gravity = Gravity.CENTER
+            tv.textSize = (sizeDp / 2.4f)
+            tv.setTextColor(Color.WHITE)
+            tv.setBackgroundColor(Color.rgb(90, 14, 26))
+            base = tv
         }
-        val tv = TextView(this)
-        tv.text = (name.trim().firstOrNull() ?: '?').uppercaseChar().toString()
-        tv.gravity = Gravity.CENTER
-        tv.textSize = (sizeDp / 2.4f)
-        tv.setTextColor(Color.WHITE)
-        tv.setBackgroundColor(Color.rgb(90, 14, 26))
-        tv.outlineProvider = round
-        tv.clipToOutline = true
-        tv.layoutParams = lp
-        return tv
+        base.outlineProvider = round
+        base.clipToOutline = true
+        val f = Frames.get(frame)
+        if (frame == null) {
+            base.layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+            return base
+        }
+        if (f != null) {
+            val ov = (sizeDp * (1f + 2f * f.inset / 100f)).toInt()
+            val box = FrameLayout(this)
+            box.clipChildren = false
+            box.addView(base, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
+            val fi = ImageView(this)
+            fi.scaleType = ImageView.ScaleType.FIT_XY
+            Img.load(f.url, fi, 512)
+            box.addView(fi, FrameLayout.LayoutParams(dp(ov), dp(ov), Gravity.CENTER))
+            box.layoutParams = LinearLayout.LayoutParams(dp(ov), dp(ov))
+            return box
+        }
+        val box = FrameLayout(this)
+        box.addView(base, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
+        val ring = View(this)
+        val g = GradientDrawable()
+        g.shape = GradientDrawable.OVAL
+        g.setColor(Color.TRANSPARENT)
+        g.setStroke(dp(2), violet)
+        ring.background = g
+        box.addView(ring, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
+        box.layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+        return box
     }
 
     private fun imageBlock(url: String): ImageView {
@@ -527,19 +552,11 @@ class MainActivity : Activity() {
         return iv
     }
 
-    private fun seal(): TextView {
-        val t = TextView(this)
-        t.text = "✓"
-        t.textSize = 9f
-        t.setTextColor(Color.WHITE)
-        t.gravity = Gravity.CENTER
-        t.typeface = Typeface.DEFAULT_BOLD
-        val bgd = GradientDrawable()
-        bgd.shape = GradientDrawable.OVAL
-        bgd.setColor(violet)
-        t.background = bgd
-        t.layoutParams = LinearLayout.LayoutParams(dp(15), dp(15)).apply { leftMargin = dp(6) }
-        return t
+    private fun seal(): ImageView {
+        val iv = ImageView(this)
+        iv.setImageResource(R.drawable.ic_seal)
+        iv.layoutParams = LinearLayout.LayoutParams(dp(17), dp(17)).apply { leftMargin = dp(6) }
+        return iv
     }
 
     private fun nameRow(name: String, verified: Boolean, role: String, size: Float = 15f): LinearLayout {
@@ -552,8 +569,11 @@ class MainActivity : Activity() {
         n.ellipsize = TextUtils.TruncateAt.END
         row.addView(n, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         if (verified) row.addView(seal())
-        if (role == "admin") row.addView(text("♛", 13f, violet).apply { setPadding(dp(6), 0, 0, 0) })
-        if (role == "mod") row.addView(text("◈", 13f, violet).apply { setPadding(dp(6), 0, 0, 0) })
+        if (role == "admin" || role == "mod") {
+            val ri = icon(if (role == "admin") R.drawable.ic_crown else R.drawable.ic_shield, violet, 16)
+            (ri.layoutParams as LinearLayout.LayoutParams).leftMargin = dp(5)
+            row.addView(ri)
+        }
         return row
     }
 
@@ -683,13 +703,14 @@ class MainActivity : Activity() {
         val head = LinearLayout(this)
         head.orientation = LinearLayout.HORIZONTAL
         head.gravity = Gravity.CENTER_VERTICAL
-        head.addView(avatarView(p.avatar, p.name, 42))
+        head.addView(avatarView(p.avatar, p.name, 42, p.frame))
         val who = LinearLayout(this)
         who.orientation = LinearLayout.VERTICAL
         who.setPadding(dp(10), 0, 0, 0)
         who.addView(nameRow(p.name, p.verified, p.role))
-        who.addView(text("@${p.username}  ·  ${p.time}", 11f, muted))
+        who.addView(text("@${p.username}", 12f, muted))
         head.addView(who, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(text(p.time, 12f, muted))
         head.setOnClickListener { showProfile(p.username) }
         c.addView(head)
         val body = LinearLayout(this)
@@ -740,7 +761,7 @@ class MainActivity : Activity() {
         val c = screen("Início", "Publicação", back = { showFeed() })
         val st = text("Carregando…", 14f, muted)
         c.addView(st)
-        async({ Parse.doc(Net.get("/post/$id").body) }, { d ->
+        async({ try { Frames.ensure() } catch (e: SessionExpired) { throw e } catch (e: Exception) { }; Parse.doc(Net.get("/post/$id").body) }, { d ->
             c.removeView(st)
             val post = Parse.posts(d).firstOrNull()
             if (post != null) c.addView(postCard(post, false))
@@ -772,7 +793,7 @@ class MainActivity : Activity() {
                 val row = LinearLayout(this)
                 row.orientation = LinearLayout.HORIZONTAL
                 row.gravity = Gravity.CENTER_VERTICAL
-                row.addView(avatarView(cm.avatar, cm.name, 34))
+                row.addView(avatarView(cm.avatar, cm.name, 34, cm.frame))
                 val w = LinearLayout(this)
                 w.orientation = LinearLayout.VERTICAL
                 w.setPadding(dp(10), 0, 0, 0)
@@ -1430,32 +1451,56 @@ class MainActivity : Activity() {
                 u = Parse.meUsername(Parse.doc(Net.get("/settings/profile").body)) ?: throw Exception("Não consegui identificar sua conta.")
                 meUser = u
             }
+            try { Frames.ensure() } catch (e: SessionExpired) { throw e } catch (e: Exception) { }
             val d = Parse.doc(Net.get("/u/" + enc(u)).body)
             Parse.profile(d, u, u == meUser)
         }, { p ->
             c.removeView(st)
+            if (p.cover != null) {
+                val cv = ImageView(this)
+                cv.scaleType = ImageView.ScaleType.CENTER_CROP
+                cv.setBackgroundColor(Color.rgb(42, 12, 17))
+                cv.layoutParams = params().apply { bottomMargin = dp(8) }
+                (cv.layoutParams as LinearLayout.LayoutParams).height = dp(130)
+                Img.load(p.cover, cv, 1080)
+                c.addView(cv)
+            }
             val head = card().apply { background = rounded(Color.rgb(50, 12, 20), 26f) }
-            val r1 = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            r1.addView(avatarView(p.avatar, p.name, 64))
-            val nm = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), 0, 0, 0)
-            }
-            nm.addView(text(p.name, 21f).apply { typeface = Typeface.DEFAULT_BOLD })
+            val r1 = LinearLayout(this)
+            r1.orientation = LinearLayout.HORIZONTAL
+            r1.gravity = Gravity.CENTER_VERTICAL
+            r1.addView(avatarView(p.avatar, p.name, 64, p.frame))
+            val nm = LinearLayout(this)
+            nm.orientation = LinearLayout.VERTICAL
+            nm.setPadding(dp(14), 0, 0, 0)
+            nm.addView(nameRow(p.name, p.verified, p.role, 21f))
             nm.addView(text("@${p.username}", 13f, muted))
             r1.addView(nm)
             head.addView(r1)
+            if (p.status.isNotBlank()) head.addView(text("● ${p.status}", 13f, violet).apply { setPadding(dp(2), dp(10), dp(2), dp(2)) })
+            if (p.badges.isNotEmpty()) {
+                val hs = android.widget.HorizontalScrollView(this)
+                hs.isHorizontalScrollBarEnabled = false
+                val br = LinearLayout(this)
+                br.orientation = LinearLayout.HORIZONTAL
+                for (svg in p.badges) {
+                    val bi = ImageView(this)
+                    bi.layoutParams = LinearLayout.LayoutParams(dp(30), dp(30)).apply { rightMargin = dp(6) }
+                    Img.loadSvg(svg, bi, dp(30) * 2)
+                    br.addView(bi)
+                }
+                hs.addView(br)
+                head.addView(hs, params().apply { topMargin = dp(10) })
+            }
             if (p.bio.isNotBlank()) head.addView(text(p.bio, 14f).apply { setPadding(dp(2), dp(12), dp(2), dp(4)) })
             if (p.stats.isNotEmpty()) {
-                val stats = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    setPadding(0, dp(10), 0, 0)
-                }
+                val stats = LinearLayout(this)
+                stats.orientation = LinearLayout.HORIZONTAL
+                stats.setPadding(0, dp(10), 0, 0)
                 for (s in p.stats.take(4)) {
-                    val cell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+                    val cell = LinearLayout(this)
+                    cell.orientation = LinearLayout.VERTICAL
+                    cell.gravity = Gravity.CENTER_HORIZONTAL
                     cell.addView(text(s.second, 16f).apply { typeface = Typeface.DEFAULT_BOLD })
                     cell.addView(text(s.first, 10f, muted))
                     stats.addView(cell, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))

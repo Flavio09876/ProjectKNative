@@ -30,7 +30,7 @@ data class Profile(
     val name: String, val username: String, val bio: String, val avatar: String?,
     val stats: List<Pair<String, String>>, val posts: List<Post>, val following: Boolean, val isMe: Boolean,
     val cover: String? = null, val status: String = "", val badges: List<String> = emptyList(),
-    val verified: Boolean = false, val frame: String? = null
+    val verified: Boolean = false, val frame: String? = null, val role: String = ""
 )
 
 object Parse {
@@ -271,7 +271,8 @@ object Parse {
             d.selectFirst(".pst-b span")?.text().orEmpty(),
             badges,
             d.selectFirst(".z-profile-name-row .z-verified") != null,
-            frameKey(d.selectFirst(".z-profile-avatar-wrap"))
+            frameKey(d.selectFirst(".z-profile-avatar-wrap")),
+            if (d.selectFirst(".z-profile-name-row .k-rtag--admin") != null) "admin" else if (d.selectFirst(".z-profile-name-row .k-rtag--mod") != null) "mod" else ""
         )
     }
 
