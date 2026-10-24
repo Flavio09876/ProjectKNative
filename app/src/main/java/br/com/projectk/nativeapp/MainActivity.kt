@@ -1,6 +1,9 @@
 package br.com.projectk.nativeapp
 
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.util.Base64
 import android.os.Bundle
 import android.text.Html
 import android.graphics.Color
@@ -16,6 +19,10 @@ import android.widget.Toast
 import java.net.CookieManager
 import java.net.CookiePolicy
 import java.net.CookieHandler
+import java.net.HttpCookie
+import java.net.URI
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -45,6 +52,125 @@ class MainActivity : Activity() {
         )
 
         showLogin()
+        restoreCookies()
+        if (!handleAuthIntent(intent)) tryRestoreSession()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAuthIntent(intent)
+    }
+
+    private val prefs by lazy { getSharedPreferences("projectk_session", MODE_PRIVATE) }
+
+    private fun cookieStore() =
+        (CookieHandler.getDefault() as? CookieManager)?.cookieStore
+
+    private fun saveCookies() {
+        val list = cookieStore()?.get(URI(baseUrl)).orEmpty()
+        val data = list.joinToString("\n") {
+            listOf(it.name, it.value, it.path ?: "/").joinToString("\t")
+        }
+        prefs.edit().putString("cookies", data).apply()
+    }
+
+    private fun restoreCookies() {
+        val data = prefs.getString("cookies", null) ?: return
+        data.lines().filter { it.isNotBlank() }.forEach { line ->
+            val p = line.split("\t")
+            if (p.size >= 3) {
+                val c = HttpCookie(p[0], p[1]).apply {
+                    path = p[2]
+                    domain = URI(baseUrl).host
+                    maxAge = -1
+                    secure = true
+                    isHttpOnly = true
+                }
+                cookieStore()?.add(URI(baseUrl), c)
+            }
+        }
+    }
+
+    private fun tryRestoreSession() {
+        if (prefs.getString("cookies", null).isNullOrBlank()) return
+        thread {
+            val ok = try { fetchPage("/home"); true } catch (e: Exception) { false }
+            runOnUiThread { if (ok) showHome("Sessão restaurada.") }
+        }
+    }
+
+    private fun b64url(bytes: ByteArray): String =
+        Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+
+    private fun startDiscordLogin() {
+        val raw = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val verifier = b64url(raw)
+        val challenge = b64url(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray()))
+        prefs.edit().putString("verifier", verifier).apply()
+        status.text = "Abrindo o navegador para entrar com o Discord…"
+        status.setTextColor(Color.LTGRAY)
+        val uri = Uri.parse("$baseUrl/auth/discord/app").buildUpon()
+            .appendQueryParameter("challenge", challenge).build()
+        startActivity(Intent(Intent.ACTION_VIEW, uri))
+    }
+
+    private fun handleAuthIntent(i: Intent?): Boolean {
+        if (i == null) return false
+        val data = i.data ?: return false
+        if (data.scheme != "projectk" || data.host != "auth") return false
+        i.data = null
+        val code = data.getQueryParameter("code")
+        val verifier = prefs.getString("verifier", null)
+        if (code.isNullOrBlank() || verifier.isNullOrBlank()) {
+            status.text = "Login com Discord cancelado ou inválido. Tente novamente."
+            status.setTextColor(red)
+            return true
+        }
+        prefs.edit().remove("verifier").apply()
+        busy = true
+        status.text = "Finalizando login…"
+        thread {
+            var ok = false
+            var message = "Não foi possível concluir o login com Discord."
+            try {
+                val form = "code=${enc(code)}&verifier=${enc(verifier)}"
+                val conn = (URL("$baseUrl/auth/app/exchange").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 15000
+                    readTimeout = 15000
+                    instanceFollowRedirects = false
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+                    setRequestProperty("User-Agent", "ProjectK-Android/0.3")
+                }
+                try {
+                    conn.outputStream.use { it.write(form.toByteArray(Charsets.UTF_8)) }
+                    val rc = conn.responseCode
+                    if (rc in 200..299) {
+                        fetchPage("/home")
+                        ok = true
+                    } else {
+                        message = "O servidor recusou o login (HTTP $rc). Tente de novo."
+                    }
+                } finally {
+                    conn.disconnect()
+                }
+            } catch (e: Exception) {
+                message = "Falha: ${e.message ?: e.javaClass.simpleName}"
+            }
+            runOnUiThread {
+                busy = false
+                if (ok) {
+                    saveCookies()
+                    showHome("Login com Discord confirmado.")
+                } else {
+                    status.text = message
+                    status.setTextColor(red)
+                }
+            }
+        }
+        return true
     }
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
@@ -132,7 +258,29 @@ class MainActivity : Activity() {
             setTextColor(Color.LTGRAY)
         }, params())
 
-        addSpace(36)
+        addSpace(30)
+
+        root.addView(Button(this).apply {
+            text = "Entrar com Discord"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(Color.rgb(88, 101, 242))
+            )
+            setOnClickListener { startDiscordLogin() }
+        }, params())
+        addSpace(8)
+        root.addView(label("Você será levado ao navegador para entrar no Discord. O app nunca vê sua senha do Discord.", 12f).apply {
+            gravity = Gravity.CENTER
+            setTextColor(Color.LTGRAY)
+        }, params())
+
+        addSpace(26)
+        root.addView(label("ou use usuário e senha", 12f).apply {
+            gravity = Gravity.CENTER
+            setTextColor(Color.GRAY)
+        }, params())
+        addSpace(12)
 
         root.addView(label("Usuário ou e-mail", 14f), params())
         addSpace(8)
@@ -241,6 +389,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 busy = false
                 if (success) {
+                    saveCookies()
                     showHome(message)
                 } else {
                     status.text = message
@@ -521,6 +670,7 @@ class MainActivity : Activity() {
                 content.addView(note)
                 content.addView(makeButton("Sair da conta") {
                     (CookieHandler.getDefault() as? CookieManager)?.cookieStore?.removeAll()
+                    prefs.edit().remove("cookies").apply()
                     showLogin()
                 }, params())
             }
