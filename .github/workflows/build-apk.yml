@@ -26,7 +26,21 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Preparar chave de assinatura
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/projectk.jks"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/projectk.jks" >> "$GITHUB_ENV"
+          else
+            echo "Aviso: sem KEYSTORE_B64, o APK sai com chave aleatória."
+          fi
+
       - name: Build debug APK
+        env:
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: gradle assembleDebug
 
       - name: Upload APK
