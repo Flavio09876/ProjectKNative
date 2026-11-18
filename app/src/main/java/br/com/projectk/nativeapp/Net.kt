@@ -70,6 +70,14 @@ object Net {
         return finish(conn)
     }
 
+    fun postJson(path: String, body: org.json.JSONObject, accept: String = "application/json"): Resp {
+        val conn = open(path, "POST", accept)
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+        conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+        return finish(conn)
+    }
+
     fun postMultipart(path: String, fields: List<Pair<String, String>>, file: Upload?, accept: String = "text/html"): Resp {
         val boundary = "----KNative" + System.currentTimeMillis()
         val conn = open(path, "POST", accept)
