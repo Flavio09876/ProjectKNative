@@ -138,14 +138,17 @@ class MainActivity : Activity() {
             etapa = "super"
             super.onCreate(savedInstanceState)
             superCalled = true
+            Crash.mark(this, "step_super")
 
             // Configura a jarra de cookies ANTES do deep link: o callback do Discord
             // precisa gravar a sessão mesmo quando o app abre do zero pelo navegador.
             etapa = "cookies"
             CookieHandler.setDefault(CookieManager(null, CookiePolicy.ACCEPT_ALL))
+            Crash.mark(this, "step_cookies")
 
             etapa = "deeplink"
             if (handleDiscordOnCreate(intent)) return
+            Crash.mark(this, "step_deeplink")
 
             etapa = "statusbar"
             window.statusBarColor = bg
@@ -161,12 +164,17 @@ class MainActivity : Activity() {
                     setBackgroundColor(bg)
                 }
                 setContentView(splash)
+                Crash.mark(this, "step_session")
                 // Usa o async() para não sobrescrever a tela de espera se o deep link
                 // do Discord chegar enquanto a sessão está sendo restaurada.
                 async({ Parse.doc(Net.get("/home").body) }, { d ->
+                    Crash.mark(this, "step_home")
                     applySiteTheme(d)
                     showHome("")
-                }, { showLogin() })
+                }, {
+                    Crash.mark(this, "step_fail")
+                    showLogin()
+                })
             } else {
                 etapa = "login"
                 showLogin()
