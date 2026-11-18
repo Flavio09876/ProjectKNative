@@ -118,47 +118,63 @@ class MainActivity : Activity() {
     private var backdropAnim: android.animation.ValueAnimator? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        applyTheme()
-        Img.init(applicationContext)
+        var etapa = "tema"
+        var superCalled = false
         try {
-            androidx.work.WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
-                "k-notif", androidx.work.ExistingPeriodicWorkPolicy.KEEP,
-                androidx.work.PeriodicWorkRequestBuilder<Notifier>(15, java.util.concurrent.TimeUnit.MINUTES).build())
-        } catch (e: Throwable) {}
-        // Molduras agora são vetoriais e animadas em Canvas (AnimatedFrameView): sem WebView.
-        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            try { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 91) } catch (e: Throwable) {}
-        }
-        super.onCreate(savedInstanceState)
-
-        // Configura a jarra de cookies ANTES do deep link: o callback do Discord
-        // precisa gravar a sessão mesmo quando o app abre do zero pelo navegador.
-        CookieHandler.setDefault(
-            CookieManager(null, CookiePolicy.ACCEPT_ALL)
-        )
-
-        if (handleDiscordOnCreate(intent)) return
-
-        window.statusBarColor = bg
-        window.navigationBarColor = bg
-
-        if (restoreCookies()) {
-            val splash = TextView(this).apply {
-                text = "Entrando…"
-                textSize = 16f
-                setTextColor(Color.LTGRAY)
-                gravity = Gravity.CENTER
-                setBackgroundColor(bg)
+            applyTheme()
+            Img.init(applicationContext)
+            Crash.install(applicationContext)
+            etapa = "notificacoes"
+            try {
+                androidx.work.WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+                    "k-notif", androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+                    androidx.work.PeriodicWorkRequestBuilder<Notifier>(15, java.util.concurrent.TimeUnit.MINUTES).build())
+            } catch (e: Throwable) {}
+            // Molduras agora são vetoriais e animadas em Canvas (AnimatedFrameView): sem WebView.
+            if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                try { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 91) } catch (e: Throwable) {}
             }
-            setContentView(splash)
-            // Usa o async() para não sobrescrever a tela de espera se o deep link
-            // do Discord chegar enquanto a sessão está sendo restaurada.
-            async({ Parse.doc(Net.get("/home").body) }, { d ->
-                applySiteTheme(d)
-                showHome("")
-            }, { showLogin() })
-        } else {
-            showLogin()
+            etapa = "super"
+            super.onCreate(savedInstanceState)
+            superCalled = true
+
+            // Configura a jarra de cookies ANTES do deep link: o callback do Discord
+            // precisa gravar a sessão mesmo quando o app abre do zero pelo navegador.
+            etapa = "cookies"
+            CookieHandler.setDefault(CookieManager(null, CookiePolicy.ACCEPT_ALL))
+
+            etapa = "deeplink"
+            if (handleDiscordOnCreate(intent)) return
+
+            etapa = "statusbar"
+            window.statusBarColor = bg
+            window.navigationBarColor = bg
+
+            etapa = "sessao"
+            if (restoreCookies()) {
+                val splash = TextView(this).apply {
+                    text = "Entrando…"
+                    textSize = 16f
+                    setTextColor(Color.LTGRAY)
+                    gravity = Gravity.CENTER
+                    setBackgroundColor(bg)
+                }
+                setContentView(splash)
+                // Usa o async() para não sobrescrever a tela de espera se o deep link
+                // do Discord chegar enquanto a sessão está sendo restaurada.
+                async({ Parse.doc(Net.get("/home").body) }, { d ->
+                    applySiteTheme(d)
+                    showHome("")
+                }, { showLogin() })
+            } else {
+                etapa = "login"
+                showLogin()
+            }
+        } catch (e: Throwable) {
+            if (!superCalled) {
+                try { super.onCreate(savedInstanceState) } catch (e2: Throwable) {}
+            }
+            Crash.screen(this, e, etapa)
         }
     }
 
