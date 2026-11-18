@@ -160,7 +160,7 @@ object Img {
                     view.setImageDrawable(d)
                     view.animate().alpha(1f).setDuration(120).start()
                     if (Build.VERSION.SDK_INT >= 28 && d is android.graphics.drawable.AnimatedImageDrawable) {
-                        d.loopCount = android.graphics.ImageDecoder.LOOP_INFINITE
+                        d.setLoopCount(-1)
                         d.start()
                     }
                 }

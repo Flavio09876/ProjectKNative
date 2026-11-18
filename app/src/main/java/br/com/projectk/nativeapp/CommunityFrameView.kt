@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewOutlineProvider
@@ -30,7 +31,8 @@ class CommunityFrameView(
 ) : FrameLayout(context) {
 
     init {
-        val pad = (avatarSizePx * 0.16f).toInt().coerceAtLeast(6)
+        // Proporção do Project Z: moldura 84dp sobre avatar 60dp (1.4x).
+        val pad = (avatarSizePx * 0.20f).toInt().coerceAtLeast(6)
         val total = avatarSizePx + pad * 2
         val oval = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
@@ -41,6 +43,12 @@ class CommunityFrameView(
         val avatar: View = if (!avatarUrl.isNullOrBlank()) {
             ImageView(context).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
+                setPadding(dp(2), dp(2), dp(2), dp(2))
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.rgb(42, 43, 50))
+                    setStroke(dp(1), Color.WHITE)
+                }
                 clipToOutline = true
                 outlineProvider = oval
                 Img.load(avatarUrl, this, avatarSizePx)
@@ -81,6 +89,8 @@ class CommunityFrameView(
         }
         layoutParams = android.widget.LinearLayout.LayoutParams(total, total)
     }
+
+    private fun dp(n: Int): Int = (n * resources.displayMetrics.density).toInt()
 
     private fun esc(v: String): String = v
         .replace("&", "&amp;")
