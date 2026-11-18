@@ -2081,10 +2081,10 @@ class MainActivity : Activity() {
             addLine(c, "Entre, jogue e ganhe kcoin. Os placares são sempre validados pelo servidor.", 12f, palette.textSoft)
             val all = games.ifEmpty {
                 listOf(
-                    NativeData.GameInfo("Jogo do gráfico", "Acompanhe o gráfico e decidiu quando sacar.", "/casino"),
-                    NativeData.GameInfo("Mines", "Campo minado com multiplicadores.", "/mines"),
-                    NativeData.GameInfo("Cobrinha", "Clássico com placar no servidor.", "/cobrinha"),
-                    NativeData.GameInfo("Arcade", "Desafios rápidos por kcoin.", "/arcade"),
+                    GameInfo("Jogo do gráfico", "Acompanhe o gráfico e decidiu quando sacar.", "/casino"),
+                    GameInfo("Mines", "Campo minado com multiplicadores.", "/mines"),
+                    GameInfo("Cobrinha", "Clássico com placar no servidor.", "/cobrinha"),
+                    GameInfo("Arcade", "Desafios rápidos por kcoin.", "/arcade"),
                 )
             }
             val icons = intArrayOf(R.drawable.ic_apps, R.drawable.ic_seal, R.drawable.ic_people, R.drawable.ic_crown)
