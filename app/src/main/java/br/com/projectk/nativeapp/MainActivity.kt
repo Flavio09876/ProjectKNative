@@ -1841,8 +1841,8 @@ class MainActivity : Activity() {
     private fun submitForm(
         path: String,
         fields: List<Pair<String, String>>,
-        onDone: () -> Unit,
         accept: String = "text/html",
+        onDone: () -> Unit,
     ) {
         thread {
             var failure: String? = null
