@@ -44,6 +44,21 @@ object Crash {
         } catch (e: Throwable) {}
     }
 
+    /** Sinal de vida: grava quando uma tela chegou ao fim sem exceção. */
+    fun mark(ctx: Context, tag: String) {
+        val text = "ok ${System.currentTimeMillis()} $tag\n"
+        try { android.util.Log.i("ProjectK", text.trim()) } catch (e: Throwable) {}
+        try {
+            java.io.File(
+                android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS), "projectk_$tag.txt"
+            ).writeText(text)
+        } catch (e: Throwable) {}
+        try {
+            java.io.File(ctx.cacheDir, "projectk_$tag.txt").writeText(text)
+        } catch (e: Throwable) {}
+    }
+
     fun install(ctx: Context) {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->

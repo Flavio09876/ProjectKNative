@@ -130,7 +130,7 @@ class MainActivity : Activity() {
                     "k-notif", androidx.work.ExistingPeriodicWorkPolicy.KEEP,
                     androidx.work.PeriodicWorkRequestBuilder<Notifier>(15, java.util.concurrent.TimeUnit.MINUTES).build())
             } catch (e: Throwable) {}
-            // Molduras agora são vetoriais e animadas em Canvas (AnimatedFrameView): sem WebView.
+            // Molduras da comunidade são componentes decorativos; nada de tela WebView.
             if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 try { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 91) } catch (e: Throwable) {}
             }
@@ -325,7 +325,6 @@ class MainActivity : Activity() {
             isAllCaps = false
             setTextColor(if (primary) Color.WHITE else palette.text)
             typeface = KUi.displayTypeface(palette)
-            letterSpacing = 0.06f * textSize
             background = KUi.button(palette, dp(palette.radiusMd).toFloat(), primary)
             stateListAnimator = null
             elevation = 0f
@@ -342,54 +341,41 @@ class MainActivity : Activity() {
         discordButton = null
         makeRoot()
 
-        addSpace(18)
+        addSpace(34)
 
-        // HUD de vidro no topo, como no tema gameover do site.
-        val hud = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            background = KUi.glass(palette, dp(palette.radiusXl).toFloat(), true)
+        val logo = TextView(this).apply {
+            text = "K"
+            textSize = 34f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            typeface = Typeface.DEFAULT_BOLD
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(palette.accent)
+            }
         }
-        val moon = TextView(this).apply {
-            text = "☾"
-            textSize = 24f
-            setTextColor(palette.accentHover)
-        }
-        hud.addView(moon, LinearLayout.LayoutParams(dp(34), dp(34)))
-        hud.addView(label("PROJECT K", 13f).apply {
-            typeface = KUi.displayTypeface(palette)
-            letterSpacing = 0.22f * textSize
+        root.addView(logo, LinearLayout.LayoutParams(dp(64), dp(64)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dp(16)
+        })
+
+        root.addView(label("Project K", 26f).apply {
+            gravity = Gravity.CENTER
+            typeface = Typeface.DEFAULT_BOLD
             setTextColor(palette.text)
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        val hearts = TextView(this).apply {
-            text = "♥ ♥ ♥ ♥"
-            textSize = 14f
-            setTextColor(palette.accent)
-        }
-        hud.addView(hearts)
-        root.addView(hud, params().apply { bottomMargin = dp(18) })
+        }, params())
+
+        root.addView(label("Entre na sua conta", 14f).apply {
+            gravity = Gravity.CENTER
+            setTextColor(palette.textSoft)
+        }, params().apply { bottomMargin = dp(30) })
 
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(20), dp(20), dp(18))
-            background = KUi.card(palette, dp(palette.radiusLg).toFloat())
+            setPadding(dp(18), dp(18), dp(18), dp(16))
+            background = KUi.card(palette, dp(14).toFloat())
         }
         root.addView(panel, params())
-
-        val title = label("ENTRE PARA CONTINUAR", 19f).apply {
-            gravity = Gravity.CENTER
-            typeface = KUi.displayTypeface(palette)
-            letterSpacing = 0.14f * textSize
-            setTextColor(palette.text)
-        }
-        panel.addView(title, params().apply { bottomMargin = dp(4) })
-        val sub = label("Sua conta, suas missões, seu K.", 12f).apply {
-            gravity = Gravity.CENTER
-            setTextColor(palette.textSoft)
-            typeface = KUi.bodyTypeface(palette)
-        }
-        panel.addView(sub, params().apply { bottomMargin = dp(20) })
 
         fun input(hint: String, pass: Boolean): EditText {
             val e = EditText(this).apply {
@@ -399,42 +385,43 @@ class MainActivity : Activity() {
                 setHintTextColor(palette.muted)
                 setSingleLine(true)
                 setPadding(dp(14), dp(12), dp(14), dp(12))
-                background = KUi.field(palette, dp(palette.radiusMd).toFloat())
-                typeface = KUi.bodyTypeface(palette)
+                background = KUi.field(palette, dp(10).toFloat())
+                typeface = Typeface.DEFAULT
                 inputType = if (pass) {
                     android.text.InputType.TYPE_CLASS_TEXT or
                         android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
                 } else android.text.InputType.TYPE_CLASS_TEXT
             }
-            panel.addView(e, params().apply { bottomMargin = dp(12) })
+            panel.addView(e, params().apply { bottomMargin = dp(10) })
             return e
         }
 
         loginInput = input("Usuário ou e-mail", false)
         passwordInput = input("Senha", true)
 
-        loginButton = makeButton("ENTRAR", { login() })
-        panel.addView(loginButton, params().apply { topMargin = dp(6) })
+        loginButton = makeButton("Entrar", { login() })
+        panel.addView(loginButton, params().apply { topMargin = dp(4) })
 
         val divider = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         divider.addView(View(this).apply {
-            background = GradientDrawable().apply { setColor(KUi.alpha(palette.borderStrong, 0.5f)) }
+            background = GradientDrawable().apply { setColor(KUi.alpha(palette.border, 0.8f)) }
         }, LinearLayout.LayoutParams(0, 1, 1f))
-        divider.addView(label("  ou  ", 12f).apply { setTextColor(palette.muted) })
-        divider.addView(View(this).apply { background = GradientDrawable().apply { setColor(KUi.alpha(palette.borderStrong, 0.5f)) } },
-            LinearLayout.LayoutParams(0, 1, 1f))
-        panel.addView(divider, params().apply { topMargin = dp(14); bottomMargin = dp(14) })
+        divider.addView(label("   ou   ", 12f).apply { setTextColor(palette.muted) })
+        divider.addView(View(this).apply {
+            background = GradientDrawable().apply { setColor(KUi.alpha(palette.border, 0.8f)) }
+        }, LinearLayout.LayoutParams(0, 1, 1f))
+        panel.addView(divider, params().apply { topMargin = dp(16); bottomMargin = dp(16) })
 
-        val dc = makeButton("ENTRAR COM DISCORD", { discordLogin() }, primary = false).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(Color.rgb(88, 101, 242), Color.rgb(64, 74, 186))).apply {
-                cornerRadius = dp(palette.radiusMd).toFloat()
-                setStroke(1, KUi.alpha(Color.WHITE, 0.25f))
+        val dc = makeButton("Continuar com Discord", { discordLogin() }, primary = false).apply {
+            background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setColor(Color.rgb(88, 101, 242))
             }
             setTextColor(Color.WHITE)
+            typeface = Typeface.DEFAULT_BOLD
         }
         discordButton = dc
         panel.addView(dc, params())
@@ -442,9 +429,10 @@ class MainActivity : Activity() {
         status = label("", 12f).apply {
             gravity = Gravity.CENTER
             setTextColor(palette.textSoft)
-            typeface = KUi.bodyTypeface(palette)
+            typeface = Typeface.DEFAULT
         }
         panel.addView(status, params().apply { topMargin = dp(12) })
+        Crash.mark(this, "login")
     }
 
     private var dotsRun: Runnable? = null
@@ -844,7 +832,6 @@ class MainActivity : Activity() {
     private fun eyebrow(parent: LinearLayout, value: String) {
         parent.addView(text(value.uppercase(), 11f, palette.accentHover).apply {
             typeface = KUi.displayTypeface(palette)
-            letterSpacing = 0.32f * textSize
         }, params().apply { bottomMargin = dp(6) })
     }
 
@@ -934,14 +921,11 @@ class MainActivity : Activity() {
     }
 
     private fun avatarView(url: String?, name: String, sizeDp: Int, frame: String? = null): View {
-        // Moldura animada de verdade: anel vetorial giratório, pulsante e com
-        // ripple, desenhado em Canvas. Nada de WebView/snapshot/GIF/WebP.
-        if (!frame.isNullOrBlank()) {
-            val extra = Math.max(8, (sizeDp * 0.20f).toInt())
-            val side = dp(sizeDp + extra * 2)
-            return AnimatedFrameView(this, palette, frame, url, side, name).apply {
-                layoutParams = LinearLayout.LayoutParams(side, side)
-            }
+        // Apenas molduras criadas pela comunidade (.uf-N), com o CSS original
+        // e animação real. Nada de anéis genéricos inventados pelo app.
+        val key = Regex("""uf-\d+""").find(frame.orEmpty())?.value
+        if (key != null && Frames.cssOf(key) != null) {
+            return CommunityFrameView(this, key, url, dp(sizeDp), name)
         }
         val round = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
@@ -1041,7 +1025,6 @@ class MainActivity : Activity() {
         row.gravity = Gravity.CENTER_VERTICAL
         val n = text(name, size)
         n.typeface = KUi.displayTypeface(palette)
-        n.letterSpacing = 0.03f * size
         n.maxLines = 1
         n.ellipsize = TextUtils.TruncateAt.END
         row.addView(n, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -1076,28 +1059,21 @@ class MainActivity : Activity() {
         top.orientation = LinearLayout.HORIZONTAL
         top.gravity = Gravity.CENTER_VERTICAL
         top.setPadding(dp(16), dp(12), dp(16), dp(10))
-        top.background = KUi.glass(palette, dp(palette.radiusXl).toFloat(), true)
-        top.elevation = dp(6).toFloat()
+        top.background = GradientDrawable().apply {
+            setColor(if (palette.light) Color.WHITE else palette.bg)
+            setStroke(1, KUi.alpha(palette.border, 0.5f))
+        }
         if (back != null) {
-            val b = text("‹", 30f, violet)
-            b.setPadding(dp(4), 0, dp(14), dp(4))
+            val b = text("‹", 32f, palette.text)
+            b.setPadding(dp(2), 0, dp(12), dp(4))
             b.setOnClickListener { back() }
             top.addView(b)
-        } else {
-            val k = TextView(this)
-            k.text = "K"
-            k.textSize = 20f
-            k.typeface = Typeface.DEFAULT_BOLD
-            k.setTextColor(Color.WHITE)
-            k.gravity = Gravity.CENTER
-            k.background = KUi.button(palette, dp(palette.radiusSm).toFloat(), true)
-            top.addView(k, LinearLayout.LayoutParams(dp(36), dp(36)).apply { rightMargin = dp(12) })
         }
-        val t = text(title, 21f)
-        t.typeface = KUi.displayTypeface(palette)
-        t.letterSpacing = 0.14f * t.textSize
+        val t = text(title, 24f)
+        t.typeface = Typeface.DEFAULT_BOLD
         t.maxLines = 1
         t.ellipsize = TextUtils.TruncateAt.END
+        t.setTextColor(palette.text)
         top.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (action != null) top.addView(action)
         if (back == null) {
@@ -1130,6 +1106,7 @@ class MainActivity : Activity() {
         page.addView(navBar(tab), params().apply { setMargins(dp(12), dp(4), dp(12), dp(8)) })
         setContentView(page)
         content = c
+        Crash.mark(this, "tela")
         return c
     }
 
@@ -1138,20 +1115,24 @@ class MainActivity : Activity() {
         nav.orientation = LinearLayout.HORIZONTAL
         nav.gravity = Gravity.CENTER
         nav.setPadding(dp(4), dp(8), dp(4), dp(8))
-        nav.background = KUi.glass(palette, dp(palette.radiusXl).toFloat(), true)
-        nav.elevation = dp(12).toFloat()
+        nav.background = GradientDrawable().apply {
+            setColor(if (palette.light) Color.WHITE else palette.surface)
+            setStroke(1, KUi.alpha(palette.border, 0.55f))
+            cornerRadius = dp(18).toFloat()
+        }
         fun slot(name: String, res: Int) {
             val col = LinearLayout(this)
             col.orientation = LinearLayout.VERTICAL
             col.gravity = Gravity.CENTER
             val on = name == tab
-            val color = if (on) palette.accentHover else palette.textSoft
-            val ico = icon(res, color, 24)
-            if (on) ico.alpha = 1f else ico.alpha = 0.78f
+            val color = if (on) palette.accent else palette.muted
+            val ico = icon(res, color, if (on) 25 else 23)
+            ico.alpha = if (on) 1f else 0.8f
             col.addView(ico)
             val l = text(name, 10f, color).apply {
-                typeface = KUi.displayTypeface(palette)
+                typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                 gravity = Gravity.CENTER
+                setPadding(0, dp(2), 0, 0)
             }
             col.addView(l)
             col.setOnClickListener { KUi.press(col); openTab(name) }
@@ -1161,10 +1142,13 @@ class MainActivity : Activity() {
         slot("Salas", R.drawable.ic_people)
         slot("Servidores", R.drawable.ic_dns)
         val plus = FrameLayout(this)
-        plus.background = KUi.button(palette, dp(palette.radiusLg).toFloat(), true)
-        plus.addView(icon(R.drawable.ic_plus, Color.WHITE, 28), FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
+        plus.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(palette.accent)
+        }
+        plus.addView(icon(R.drawable.ic_plus, Color.WHITE, 24), FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
         plus.setOnClickListener { KUi.press(plus); newPost() }
-        nav.addView(plus, LinearLayout.LayoutParams(dp(54), dp(46)).apply { leftMargin = dp(4); rightMargin = dp(4) })
+        nav.addView(plus, LinearLayout.LayoutParams(dp(46), dp(46)).apply { leftMargin = dp(6); rightMargin = dp(6) })
         slot("Chat", R.drawable.ic_chat)
         slot("Mais", R.drawable.ic_apps)
         return nav
@@ -2828,7 +2812,6 @@ class MainActivity : Activity() {
             wrap.orientation = LinearLayout.VERTICAL
             wrap.addView(text(caption, 11f, palette.accentHover).apply {
                 typeface = KUi.displayTypeface(palette)
-                letterSpacing = 0.32f * textSize
                 setPadding(dp(6), dp(6), 0, dp(6))
             })
             val g = LinearLayout(this).apply {

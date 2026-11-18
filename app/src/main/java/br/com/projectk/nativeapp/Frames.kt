@@ -9,8 +9,8 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Na “leva 1” este arquivo renderizava o CSS num WebView fora da tela e
  * fotografava o resultado — por isso as molduras viravam PNG estático.
- * Agora ele apenas extrai as cores/definições do CSS; o desenho animado
- * acontece em [AnimatedFrameView], 100% Canvas, sem WebView de tela.
+ * Agora ele guarda também o CSS original das criações `.uf-N`; a moldura é
+ * desenhada por [CommunityFrameView], sem WebView de tela.
  */
 object Frames {
     class F(val url: String, val inset: Float)
@@ -20,6 +20,8 @@ object Frames {
 
     private val user = ConcurrentHashMap<String, F>()
     private val ucolors = ConcurrentHashMap<String, IntArray>()
+    /** CSS original da criação da comunidade (.uf-N), para renderização fiel. */
+    private val userCss = ConcurrentHashMap<String, String>()
     private val custom = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
 
     private val hexRx = Regex("""#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b""")
@@ -93,23 +95,33 @@ object Frames {
         } catch (e: Throwable) {}
     }
 
+    /** CSS completo da moldura criada pela comunidade, pronto para o renderizador. */
+    fun cssOf(key: String?): String? = if (key == null) null else userCss[key]
+
     private fun feedCss(css: String) {
         for (m in Regex("""\.(uf-\d+)::after\s*\{([^}]*)\}""").findAll(css)) {
             val key = m.groupValues[1]
-            val u = urlRx.find(m.groupValues[2])?.groupValues?.get(1)
-            if (u != null) {
-                val ins = insetRx.find(m.groupValues[2])?.groupValues?.get(1)?.toFloatOrNull()
-                user[key] = F(Net.abs(u) ?: u, if (ins != null) kotlin.math.abs(ins) else 20f)
+            val body = m.groupValues[2]
+            val u = urlRx.find(body)?.groupValues?.get(1)
+            val absolute = u?.let { Net.abs(it) ?: it }
+            val cssBody = if (u != null && absolute != null) body.replace(u, absolute) else body
+            if (u != null && absolute != null) {
+                val ins = insetRx.find(body)?.groupValues?.get(1)?.toFloatOrNull()
+                user[key] = F(absolute, if (ins != null) kotlin.math.abs(ins) else 20f)
             }
-            val cs = hexColors(m.groupValues[2])
+            val cs = hexColors(cssBody)
             if (cs.isNotEmpty()) ucolors[key] = cs
+            userCss[key] = (userCss[key].orEmpty() + ".$key::after{$cssBody}")
         }
         for (m in Regex("""\.(uf-\d+)::before\s*\{([^}]*)\}""").findAll(css)) {
-            val cs = hexColors(m.groupValues[2])
+            val key = m.groupValues[1]
+            val body = m.groupValues[2]
+            val cs = hexColors(body)
             if (cs.isNotEmpty()) {
-                val old = ucolors[m.groupValues[1]] ?: IntArray(0)
-                ucolors[m.groupValues[1]] = (old.toList() + cs.toList()).distinct().toIntArray()
+                val old = ucolors[key] ?: IntArray(0)
+                ucolors[key] = (old.toList() + cs.toList()).distinct().toIntArray()
             }
+            userCss[key] = ".$key::before{$body}" + userCss[key].orEmpty()
         }
         for (m in Regex("""\.(cx-[0-9a-fA-F-]+)[^{]*\{([^}]*)\}""").findAll(css)) {
             val cs = hexColors(m.groupValues[2])
