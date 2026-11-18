@@ -124,6 +124,7 @@ class MainActivity : Activity() {
             applyTheme()
             Img.init(applicationContext)
             Crash.install(applicationContext)
+            Crash.mark(this, "boot")
             etapa = "notificacoes"
             try {
                 androidx.work.WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(

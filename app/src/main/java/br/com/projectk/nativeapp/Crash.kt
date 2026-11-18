@@ -57,6 +57,17 @@ object Crash {
         try {
             java.io.File(ctx.cacheDir, "projectk_$tag.txt").writeText(text)
         } catch (e: Throwable) {}
+        try {
+            val cv = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, "projectk_$tag.txt")
+                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                put(MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+            }
+            val uri = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)
+            ctx.contentResolver.openOutputStream(uri ?: return)?.use {
+                it.write(text.toByteArray(Charsets.UTF_8))
+            }
+        } catch (e: Throwable) {}
     }
 
     fun install(ctx: Context) {
