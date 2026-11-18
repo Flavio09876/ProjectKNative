@@ -181,13 +181,15 @@ class KBackdropDrawable(private val p: KPalette) : Drawable() {
         val moonR = maxOf(w, h) * 0.52f
         val mx = w * 0.94f + drift
         val my = -h * 0.12f + drift * 0.5f
+        // Construtor com intArrayOf: o longArrayOf exige Color.pack() e aqui
+        // gerava um ID de color space invalido no Android 13 (crash no draw).
         moon.shader = RadialGradient(
-            mx, my, 1f, mx, my, moonR,
-            longArrayOf(
-                KUi.alpha(Color.WHITE, 0.30f).toLong(),
-                KUi.alpha(Color.WHITE, 0.12f).toLong(),
-                KUi.alpha(p.accent, 0.07f).toLong(),
-                Color.TRANSPARENT.toLong(),
+            mx, my, moonR,
+            intArrayOf(
+                KUi.alpha(Color.WHITE, 0.30f),
+                KUi.alpha(Color.WHITE, 0.12f),
+                KUi.alpha(p.accent, 0.07f),
+                Color.TRANSPARENT,
             ),
             floatArrayOf(0f, 0.28f, 0.62f, 1f),
             Shader.TileMode.CLAMP,
@@ -208,9 +210,8 @@ class KBackdropDrawable(private val p: KPalette) : Drawable() {
         }
 
         vignette.shader = RadialGradient(
-            w * 0.5f, h * 0.42f, 1f,
             w * 0.5f, h * 0.42f, maxOf(w, h) * 0.78f,
-            longArrayOf(Color.TRANSPARENT.toLong(), Color.TRANSPARENT.toLong(), KUi.alpha(Color.BLACK, 0.52f).toLong()),
+            intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, KUi.alpha(Color.BLACK, 0.52f)),
             floatArrayOf(0f, 0.42f, 1f),
             Shader.TileMode.CLAMP,
         )
