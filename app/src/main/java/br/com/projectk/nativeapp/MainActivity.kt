@@ -151,11 +151,16 @@ class MainActivity : Activity() {
             Crash.mark(this, "step_deeplink")
 
             etapa = "statusbar"
+            Crash.mark(this, "step_before_statusbar")
             window.statusBarColor = bg
             window.navigationBarColor = bg
+            Crash.mark(this, "step_statusbar")
 
             etapa = "sessao"
-            if (restoreCookies()) {
+            Crash.mark(this, "step_before_restore")
+            val restored = restoreCookies()
+            Crash.mark(this, if (restored) "step_restored" else "step_no_cookie")
+            if (restored) {
                 val splash = TextView(this).apply {
                     text = "Entrando…"
                     textSize = 16f
@@ -180,6 +185,7 @@ class MainActivity : Activity() {
                 showLogin()
             }
         } catch (e: Throwable) {
+            Crash.mark(this, "step_catch_$etapa")
             if (!superCalled) {
                 try { super.onCreate(savedInstanceState) } catch (e2: Throwable) {}
             }
