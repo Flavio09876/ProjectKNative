@@ -88,25 +88,11 @@ object Img {
         return null
     }
 
-    fun load(url: String?, view: ImageView, maxW: Int = 1080) {
-        view.tag = url
-        view.setImageDrawable(null)
-        if (url == null) return
+    /** Versão reutilizável do carregador para views desenhadas em Canvas. */
+    fun loadBitmap(url: String?, maxW: Int = 512, cb: (Bitmap?) -> Unit) {
+        if (url == null) { cb(null); return }
         val key = url + "@" + maxW
-        val hit = cache.get(key)
-        if (hit != null) {
-            view.setImageBitmap(hit)
-            return
-        }
-        val cb: (Bitmap?) -> Unit = { bmp ->
-            view.post {
-                if (view.tag == url && bmp != null) {
-                    view.alpha = 0f
-                    view.setImageBitmap(bmp)
-                    view.animate().alpha(1f).setDuration(180).start()
-                }
-            }
-        }
+        cache.get(key)?.let { cb(it); return }
         synchronized(pending) {
             val l = pending[key]
             if (l != null) { l.add(cb); return }
@@ -122,6 +108,21 @@ object Img {
             if (bmp != null) cache.put(key, bmp)
             val ls = synchronized(pending) { pending.remove(key) }
             ls?.forEach { it(bmp) }
+        }
+    }
+
+    fun load(url: String?, view: ImageView, maxW: Int = 1080) {
+        view.tag = url
+        view.setImageDrawable(null)
+        if (url == null) return
+        loadBitmap(url, maxW) { bmp ->
+            view.post {
+                if (view.tag == url && bmp != null) {
+                    view.alpha = 0f
+                    view.setImageBitmap(bmp)
+                    view.animate().alpha(1f).setDuration(180).start()
+                }
+            }
         }
     }
 

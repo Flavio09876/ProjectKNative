@@ -19,6 +19,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="projz" android:host="discord" />
+                <data android:scheme="projectk" android:host="discord" />
             </intent-filter>
         </activity>
     </application>

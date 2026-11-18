@@ -69,6 +69,38 @@ class MainActivity : Activity() {
         errorColor = palette.danger
     }
 
+    /** O site guarda o tema em data-theme no <html>; o app passa a seguir a sessão. */
+    private fun applySiteTheme(d: org.jsoup.nodes.Document): Boolean {
+        try {
+            val key = d.selectFirst("html[data-theme]")?.attr("data-theme")?.trim().orEmpty()
+            if (key.isBlank() || key == palette.key) return false
+            if (KTheme.all.none { it.key == key }) return false
+            KTheme.save(this, key)
+            applyTheme()
+            return true
+        } catch (e: Throwable) {
+            return false
+        }
+    }
+
+    private fun syncSiteThemeAsync(sid: Int) {
+        thread {
+            try {
+                val key = Parse.doc(Net.get("/home").body)
+                    .selectFirst("html[data-theme]")?.attr("data-theme")?.trim().orEmpty()
+                if (key.isBlank() || key == palette.key) return@thread
+                if (KTheme.all.none { it.key == key }) return@thread
+                runOnUiThread {
+                    if (sid != token) return@runOnUiThread
+                    KTheme.save(this, key)
+                    applyTheme()
+                    showFeed()
+                }
+            } catch (e: Throwable) {
+            }
+        }
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private var token = 0
     private var activeTab = "Início"
@@ -82,6 +114,8 @@ class MainActivity : Activity() {
 
     private var pickedUri: Uri? = null
     private var pickedLabel: TextView? = null
+    private var discordButton: Button? = null
+    private var backdropAnim: android.animation.ValueAnimator? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         applyTheme()
@@ -91,7 +125,7 @@ class MainActivity : Activity() {
                 "k-notif", androidx.work.ExistingPeriodicWorkPolicy.KEEP,
                 androidx.work.PeriodicWorkRequestBuilder<Notifier>(15, java.util.concurrent.TimeUnit.MINUTES).build())
         } catch (e: Throwable) {}
-        Frames.init(this)
+        // Molduras agora são vetoriais e animadas em Canvas (AnimatedFrameView): sem WebView.
         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             try { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 91) } catch (e: Throwable) {}
         }
@@ -117,17 +151,12 @@ class MainActivity : Activity() {
                 setBackgroundColor(bg)
             }
             setContentView(splash)
-            thread {
-                val ok = try {
-                    Net.get("/home")
-                    true
-                } catch (e: Exception) {
-                    false
-                }
-                runOnUiThread {
-                    if (ok) showHome("") else showLogin()
-                }
-            }
+            // Usa o async() para não sobrescrever a tela de espera se o deep link
+            // do Discord chegar enquanto a sessão está sendo restaurada.
+            async({ Parse.doc(Net.get("/home").body) }, { d ->
+                applySiteTheme(d)
+                showHome("")
+            }, { showLogin() })
         } else {
             showLogin()
         }
@@ -135,6 +164,8 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         stopPoll()
+        backdropAnim?.cancel()
+        backdropAnim = null
         super.onDestroy()
     }
 
@@ -157,7 +188,12 @@ class MainActivity : Activity() {
             val store = (CookieHandler.getDefault() as CookieManager).cookieStore
             val arr = JSONArray()
             for (c in store.cookies) {
-                arr.put(JSONObject().put("n", c.name).put("v", c.value).put("p", c.path ?: "/").put("s", c.secure))
+                arr.put(JSONObject()
+                    .put("n", c.name).put("v", c.value)
+                    .put("p", c.path ?: "/").put("s", c.secure)
+                    .put("d", c.domain)
+                    .put("h", c.isHttpOnly)
+                    .put("x", c.maxAge))
             }
             prefs().edit().putString("cookies", arr.toString()).apply()
         } catch (e: Exception) {
@@ -174,6 +210,13 @@ class MainActivity : Activity() {
                 val c = HttpCookie(o.getString("n"), o.getString("v"))
                 c.path = o.optString("p", "/")
                 c.secure = o.optBoolean("s")
+                c.isHttpOnly = o.optBoolean("h", false)
+                val domain = o.optString("d", "")
+                if (domain.isNotBlank()) {
+                    try { c.domain = domain } catch (e: Throwable) {}
+                }
+                val age = o.optLong("x", -1L)
+                if (age >= 0L) c.maxAge = age
                 store.add(URI(Net.BASE), c)
             }
             arr.length() > 0
@@ -217,12 +260,15 @@ class MainActivity : Activity() {
         }
 
     private fun makeRoot(): LinearLayout {
+        backdropAnim?.cancel()
+        val bd = KUi.backdrop(palette)
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(24), dp(36), dp(24), dp(28))
-            setBackgroundColor(bg)
+            background = bd
         }
+        backdropAnim = bd.startAnimating()
 
         val scroll = ScrollView(this)
         scroll.isFillViewport = true
@@ -243,7 +289,8 @@ class MainActivity : Activity() {
             setHintTextColor(palette.muted)
             setSingleLine(true)
             setPadding(dp(14), dp(12), dp(14), dp(12))
-            setBackgroundColor(palette.surfaceRaised)
+            background = KUi.field(palette, dp(palette.radiusMd).toFloat())
+            typeface = KUi.bodyTypeface(palette)
             if (password) {
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or
                     android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -256,67 +303,132 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun makeButton(text: String, action: () -> Unit): Button {
+    private fun makeButton(text: String, action: () -> Unit, primary: Boolean = true): Button {
         return Button(this).apply {
             this.text = text
             isAllCaps = false
-            setTextColor(Color.WHITE)
-            setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(red)
-            )
-            setOnClickListener { action() }
+            setTextColor(if (primary) Color.WHITE else palette.text)
+            typeface = KUi.displayTypeface(palette)
+            letterSpacing = 0.06f * textSize
+            background = KUi.button(palette, dp(palette.radiusMd).toFloat(), primary)
+            stateListAnimator = null
+            elevation = 0f
+            setPadding(dp(16), dp(11), dp(16), dp(11))
+            setOnClickListener { KUi.press(this); action() }
         }
     }
 
     private fun showLogin() {
+        token++
+        stopPoll()
+        backAction = null
+        activeTab = "Login"
+        discordButton = null
         makeRoot()
 
-        addSpace(30)
-        val tile = TextView(this)
-        tile.text = "K"
-        tile.textSize = 40f
-        tile.gravity = Gravity.CENTER
-        tile.setTextColor(Color.WHITE)
-        tile.typeface = android.graphics.Typeface.DEFAULT_BOLD
-        tile.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(225, 29, 46), Color.rgb(120, 10, 25))).apply { cornerRadius = dp(22).toFloat() }
-        root.addView(tile, LinearLayout.LayoutParams(dp(84), dp(84)).apply { gravity = Gravity.CENTER_HORIZONTAL })
-        addSpace(16)
-        root.addView(label("Project K", 26f).apply {
-            gravity = Gravity.CENTER
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-        }, params())
-        root.addView(label("Entre para continuar", 14f).apply {
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(169, 154, 157))
-        }, params())
+        addSpace(18)
 
-        addSpace(28)
-
-        root.addView(label("Usuário ou e-mail", 14f), params())
-        addSpace(8)
-        loginInput = makeInput("Digite seu usuário ou e-mail")
-
-        root.addView(label("Senha", 14f), params())
-        addSpace(8)
-        passwordInput = makeInput("Digite sua senha", true)
-
-        addSpace(8)
-        loginButton = makeButton("Entrar") { login() }
-        root.addView(loginButton, params())
-        addSpace(10)
-        root.addView(label("ou", 12f).apply { gravity = Gravity.CENTER; setTextColor(Color.rgb(169, 154, 157)) }, params())
-        addSpace(10)
-        val dc = makeButton("Entrar com Discord") { discordLogin() }
-        dc.background = GradientDrawable().apply { setColor(Color.rgb(88, 101, 242)); cornerRadius = dp(16).toFloat() }
-        root.addView(dc, params())
-
-        addSpace(16)
-        status = label("", 13f).apply {
-            setTextColor(Color.LTGRAY)
-            gravity = Gravity.CENTER
+        // HUD de vidro no topo, como no tema gameover do site.
+        val hud = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = KUi.glass(palette, dp(palette.radiusXl).toFloat(), true)
         }
-        root.addView(status, params())
+        val moon = TextView(this).apply {
+            text = "☾"
+            textSize = 24f
+            setTextColor(palette.accentHover)
+        }
+        hud.addView(moon, LinearLayout.LayoutParams(dp(34), dp(34)))
+        hud.addView(label("PROJECT K", 13f).apply {
+            typeface = KUi.displayTypeface(palette)
+            letterSpacing = 0.22f * textSize
+            setTextColor(palette.text)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        val hearts = TextView(this).apply {
+            text = "♥ ♥ ♥ ♥"
+            textSize = 14f
+            setTextColor(palette.accent)
+        }
+        hud.addView(hearts)
+        root.addView(hud, params().apply { bottomMargin = dp(18) })
 
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(18))
+            background = KUi.card(palette, dp(palette.radiusLg).toFloat())
+        }
+        root.addView(panel, params())
+
+        val title = label("ENTRE PARA CONTINUAR", 19f).apply {
+            gravity = Gravity.CENTER
+            typeface = KUi.displayTypeface(palette)
+            letterSpacing = 0.14f * textSize
+            setTextColor(palette.text)
+        }
+        panel.addView(title, params().apply { bottomMargin = dp(4) })
+        val sub = label("Sua conta, suas missões, seu K.", 12f).apply {
+            gravity = Gravity.CENTER
+            setTextColor(palette.textSoft)
+            typeface = KUi.bodyTypeface(palette)
+        }
+        panel.addView(sub, params().apply { bottomMargin = dp(20) })
+
+        fun input(hint: String, pass: Boolean): EditText {
+            val e = EditText(this).apply {
+                this.hint = hint
+                textSize = 15f
+                setTextColor(palette.text)
+                setHintTextColor(palette.muted)
+                setSingleLine(true)
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = KUi.field(palette, dp(palette.radiusMd).toFloat())
+                typeface = KUi.bodyTypeface(palette)
+                inputType = if (pass) {
+                    android.text.InputType.TYPE_CLASS_TEXT or
+                        android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                } else android.text.InputType.TYPE_CLASS_TEXT
+            }
+            panel.addView(e, params().apply { bottomMargin = dp(12) })
+            return e
+        }
+
+        loginInput = input("Usuário ou e-mail", false)
+        passwordInput = input("Senha", true)
+
+        loginButton = makeButton("ENTRAR", { login() })
+        panel.addView(loginButton, params().apply { topMargin = dp(6) })
+
+        val divider = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        divider.addView(View(this).apply {
+            background = GradientDrawable().apply { setColor(KUi.alpha(palette.borderStrong, 0.5f)) }
+        }, LinearLayout.LayoutParams(0, 1, 1f))
+        divider.addView(label("  ou  ", 12f).apply { setTextColor(palette.muted) })
+        divider.addView(View(this).apply { background = GradientDrawable().apply { setColor(KUi.alpha(palette.borderStrong, 0.5f)) } },
+            LinearLayout.LayoutParams(0, 1, 1f))
+        panel.addView(divider, params().apply { topMargin = dp(14); bottomMargin = dp(14) })
+
+        val dc = makeButton("ENTRAR COM DISCORD", { discordLogin() }, primary = false).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.rgb(88, 101, 242), Color.rgb(64, 74, 186))).apply {
+                cornerRadius = dp(palette.radiusMd).toFloat()
+                setStroke(1, KUi.alpha(Color.WHITE, 0.25f))
+            }
+            setTextColor(Color.WHITE)
+        }
+        discordButton = dc
+        panel.addView(dc, params())
+
+        status = label("", 12f).apply {
+            gravity = Gravity.CENTER
+            setTextColor(palette.textSoft)
+            typeface = KUi.bodyTypeface(palette)
+        }
+        panel.addView(status, params().apply { topMargin = dp(12) })
     }
 
     private var dotsRun: Runnable? = null
@@ -347,9 +459,9 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Login Discord 100% nativo: o app abre o OAuth no navegador do celular e
-     * o site devolve o controle por deep link projectk://discord com um ticket
-     * assinado. Nenhum WebView fica dentro do app.
+     * Login Discord 100% nativo: o app abre o OAuth no navegador e o site
+     * devolve o controle por deep link (projz://discord ou projectk://discord)
+     * com um ticket assinado. Nenhum WebView fica dentro do app.
      */
     private fun discordLogin() {
         val raw = ByteArray(24)
@@ -357,58 +469,112 @@ class MainActivity : Activity() {
         val state = android.util.Base64.encodeToString(raw, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP)
             .trimEnd('=')
         prefs().edit().putString("discord_state", state).apply()
+        discordButton?.let {
+            it.isEnabled = false
+            it.text = "AGUARDANDO AUTORIZAÇÃO…"
+        }
+        if (::status.isInitialized) {
+            status.text = "Aguardando autorização no navegador…"
+            status.setTextColor(palette.textSoft)
+        }
         val url = Net.BASE + "/app/discord/start?s=" + enc(state) + "&r=projz"
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            toast("Continue no navegador. Volte ao app quando autorizar.")
+            if (::status.isInitialized) {
+                status.text = "Aguardando autorização… Toque aqui para reenviar."
+                status.setOnClickListener { discordLogin() }
+            }
         } catch (e: Throwable) {
-            toast("Não foi possível abrir o navegador.")
+            prefs().edit().remove("discord_state").apply()
+            discordButton?.let { it.isEnabled = true; it.text = "ENTRAR COM DISCORD" }
+            if (::status.isInitialized) {
+                status.text = "Não foi possível abrir o navegador. Toque para tentar de novo."
+                status.setOnClickListener { discordLogin() }
+            }
         }
     }
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleDiscordCallback(intent)
+        if (handleDiscordCallback(intent)) clearDeepLink()
     }
+
+    private fun clearDeepLink() {
+        try { setIntent(Intent(this, MainActivity::class.java)) } catch (e: Throwable) {}
+    }
+
+    private fun isDiscordUri(u: Uri?): Boolean =
+        u != null &&
+            (u.scheme?.equals("projz", true) == true || u.scheme?.equals("projectk", true) == true) &&
+            u.host?.equals("discord", true) == true
 
     private fun handleDiscordOnCreate(i: Intent?): Boolean {
         val u = i?.data ?: return false
-        if (!"projz".equals(u.scheme, true) || !"discord".equals(u.host, true)) return false
-        handleDiscordCallback(i)
-        return true
+        if (!isDiscordUri(u)) return false
+        val handled = handleDiscordCallback(i)
+        clearDeepLink()
+        return handled
     }
 
-    private fun handleDiscordCallback(i: Intent?) {
-        val u = i?.data ?: return
-        if (!"projz".equals(u.scheme, true) || !"discord".equals(u.host, true)) return
+    private fun discordError(error: String): String = when (error) {
+        "off" -> "O login com Discord não está disponível no site."
+        "discord" -> "O Discord não respondeu. Tente de novo."
+        "banido" -> "Esta conta está suspensa."
+        "email" -> "Já existe conta com esse e-mail. Entre com senha e ligue o Discord em Configurações."
+        "oauth" -> "Autorização cancelada ou expirada."
+        else -> "Não foi possível entrar com o Discord."
+    }
+
+    private fun handleDiscordCallback(i: Intent?): Boolean {
+        val u = i?.data ?: return false
+        if (!isDiscordUri(u)) return false
         val state = u.getQueryParameter("s").orEmpty()
         val ticket = u.getQueryParameter("t").orEmpty()
         val error = u.getQueryParameter("err")
-        if (!error.isNullOrBlank()) {
-            val msg = when (error) {
-                "off" -> "O login com Discord não está disponível no site."
-                "discord" -> "O Discord não respondeu. Tente de novo."
-                "banido" -> "Esta conta está suspensa."
-                "email" -> "Já existe conta com esse e-mail. Entre com senha e ligue o Discord em Configurações."
-                "oauth" -> "Autorização cancelada ou expirada."
-                else -> "Não foi possível entrar com o Discord."
-            }
-            toast(msg)
-            showLogin()
-            return
-        }
+
+        // Consome o estado em TODOS os ramos: links antigos ou reprocessados
+        // nunca mais podem casar com um pedido pendente.
         val expected = prefs().getString("discord_state", null)
-        if (expected == null || expected != state || state.isBlank()) {
-            toast("Pedido de login inválido. Tente de novo.")
-            return
-        }
         prefs().edit().remove("discord_state").apply()
-        if (u.getQueryParameter("need") == "1" || ticket.isBlank()) {
-            showDiscordSignup(state, ticket)
-        } else {
-            finishDiscordLogin(state, ticket)
+        discordButton?.let { it.isEnabled = true; it.text = "ENTRAR COM DISCORD" }
+        if (::status.isInitialized) status.setOnClickListener(null)
+
+        if (!error.isNullOrBlank()) {
+            toast(discordError(error))
+            showLogin()
+            return true
         }
+        if (state.isBlank() || expected == null || expected != state) {
+            toast("Pedido de login inválido. Tente de novo.")
+            showLogin()
+            return true
+        }
+        if (u.getQueryParameter("need") == "1") {
+            if (ticket.isBlank()) {
+                toast("O Discord não devolveu a autorização. Tente de novo.")
+                showLogin()
+            } else showDiscordSignup(state, ticket)
+            return true
+        }
+        if (ticket.isBlank()) {
+            toast("O Discord não devolveu a autorização. Tente de novo.")
+            showLogin()
+            return true
+        }
+        finishDiscordLogin(state, ticket)
+        return true
+    }
+
+    /** Aceita tanto o JSON {ok:true} quanto um redirect para /home com cookie de sessão. */
+    private fun discordSessionOk(r: Resp): Boolean {
+        val jsonOk = try { JSONObject(r.body).optBoolean("ok") } catch (e: Throwable) { false }
+        return jsonOk || r.path.endsWith("/home")
+    }
+
+    private fun discordSessionError(r: Resp): String {
+        val jsonError = try { JSONObject(r.body).optString("error") } catch (e: Throwable) { "" }
+        return jsonError.ifBlank { "Não foi possível concluir o login. (HTTP ${r.code})" }
     }
 
     private fun finishDiscordLogin(state: String, ticket: String) {
@@ -422,18 +588,16 @@ class MainActivity : Activity() {
         setContentView(wait)
         thread {
             var msg: String? = null
+            var ok = false
             try {
                 val r = Net.postJson(
                     "/app/discord/session",
                     JSONObject().put("s", state).put("t", ticket),
                 )
-                val o = JSONObject(r.body)
-                if (!o.optBoolean("ok")) {
-                    msg = o.optString("error").ifBlank { "Não foi possível concluir o login." }
-                } else {
-                    saveCookies()
-                    meUser = null
-                }
+                // Grava o cookie mesmo quando a resposta veio como redirect HTML.
+                saveCookies()
+                ok = discordSessionOk(r)
+                if (!ok) msg = discordSessionError(r) else meUser = null
             } catch (e: SessionExpired) {
                 msg = "Sessão expirada. Tente de novo."
             } catch (e: Throwable) {
@@ -441,8 +605,8 @@ class MainActivity : Activity() {
             }
             val failure = msg
             runOnUiThread {
-                if (failure == null) showHome("") else {
-                    toast(failure)
+                if (ok) showHome("") else {
+                    toast(failure ?: "Não foi possível concluir o login.")
                     showLogin()
                 }
             }
@@ -453,10 +617,10 @@ class MainActivity : Activity() {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(20), dp(22), dp(8))
-            setBackgroundColor(palette.surface)
+            background = KUi.card(palette, dp(palette.radiusLg).toFloat())
         }
         box.addView(text("Escolha seu @ para entrar", 17f).apply {
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = KUi.displayTypeface(palette)
             setPadding(0, 0, 0, dp(6))
         })
         box.addView(text("Sua conta Discord foi autorizada. Falta só o @ e a data de nascimento.", 13f, palette.textSoft))
@@ -497,9 +661,24 @@ class MainActivity : Activity() {
                                 .put("s", state).put("t", ticket)
                                 .put("username", uname).put("birth_date", data),
                         )
-                        val o = JSONObject(r.body)
-                        if (o.optBoolean("ok")) newTicket = o.optString("t")
-                        else msg = o.optString("error").ifBlank { "Não foi possível criar a conta." }
+                        saveCookies()
+                        val o = try { JSONObject(r.body) } catch (e: Throwable) { null }
+                        when {
+                            o?.optBoolean("ok") == true -> {
+                                newTicket = o.optString("t")
+                                if (newTicket.isNullOrBlank()) {
+                                    msg = "A conta foi criada. Entre com Discord novamente."
+                                    newTicket = null
+                                }
+                            }
+                            r.path.endsWith("/home") -> {
+                                saveCookies()
+                                meUser = null
+                                newTicket = ticket
+                            }
+                            else -> msg = o?.optString("error")?.ifBlank { null }
+                                ?: "Não foi possível criar a conta. (HTTP ${r.code})"
+                        }
                     } catch (e: Throwable) {
                         msg = "Falha: ${e.message}"
                     }
@@ -507,7 +686,10 @@ class MainActivity : Activity() {
                     val nt = newTicket
                     runOnUiThread {
                         if (nt != null) finishDiscordLogin(state, nt)
-                        else { toast(fail ?: "Falha ao criar a conta."); showLogin() }
+                        else {
+                            toast(fail ?: "Falha ao criar a conta.")
+                            showLogin()
+                        }
                     }
                 }
             }
@@ -634,7 +816,7 @@ class MainActivity : Activity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(15), dp(13), dp(15), dp(13))
-            background = rounded(palette.surface, palette.radiusMd.toFloat())
+            background = KUi.card(palette, dp(palette.radiusLg).toFloat())
             layoutParams = params().apply { bottomMargin = dp(11) }
         }
     }
@@ -644,9 +826,9 @@ class MainActivity : Activity() {
     }
 
     private fun eyebrow(parent: LinearLayout, value: String) {
-        parent.addView(text(value.uppercase(), 11f, palette.accent).apply {
-            typeface = Typeface.DEFAULT_BOLD
-            letterSpacing = 0.14f
+        parent.addView(text(value.uppercase(), 11f, palette.accentHover).apply {
+            typeface = KUi.displayTypeface(palette)
+            letterSpacing = 0.32f * textSize
         }, params().apply { bottomMargin = dp(6) })
     }
 
@@ -654,8 +836,9 @@ class MainActivity : Activity() {
         return text(value, 13f, palette.text).apply {
             gravity = Gravity.CENTER
             setPadding(dp(14), dp(10), dp(14), dp(10))
-            background = rounded(tint(palette.accent, 0.18f), palette.radiusMd.toFloat())
-            setOnClickListener { action() }
+            typeface = KUi.displayTypeface(palette)
+            background = KUi.button(palette, dp(palette.radiusMd).toFloat(), false)
+            setOnClickListener { KUi.press(this); action() }
         }
     }
 
@@ -670,7 +853,8 @@ class MainActivity : Activity() {
             setTextColor(palette.text)
             textSize = 15f
             setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = rounded(palette.surfaceRaised, palette.radiusMd.toFloat())
+            background = KUi.field(palette, dp(palette.radiusMd).toFloat())
+            typeface = KUi.bodyTypeface(palette)
             if (multi) {
                 minLines = 4
                 gravity = Gravity.TOP
@@ -684,6 +868,7 @@ class MainActivity : Activity() {
     }
 
     private class Skel(c: android.content.Context) : LinearLayout(c) {
+        private var message: TextView? = null
         var text: CharSequence = ""
             set(v) {
                 field = v
@@ -693,9 +878,10 @@ class MainActivity : Activity() {
                 t.text = v
                 t.textSize = 14f
                 t.setTextColor(Color.rgb(255, 120, 120))
+                message = t
                 addView(t)
             }
-        fun setTextColor(col: Int) {}
+        fun setTextColor(col: Int) { message?.setTextColor(col) }
     }
 
     private fun skeleton(): Skel {
@@ -732,6 +918,15 @@ class MainActivity : Activity() {
     }
 
     private fun avatarView(url: String?, name: String, sizeDp: Int, frame: String? = null): View {
+        // Moldura animada de verdade: anel vetorial giratório, pulsante e com
+        // ripple, desenhado em Canvas. Nada de WebView/snapshot/GIF/WebP.
+        if (!frame.isNullOrBlank()) {
+            val extra = Math.max(8, (sizeDp * 0.20f).toInt())
+            val side = dp(sizeDp + extra * 2)
+            return AnimatedFrameView(this, palette, frame, url, side, name).apply {
+                layoutParams = LinearLayout.LayoutParams(side, side)
+            }
+        }
         val round = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
                 outline.setOval(0, 0, view.width, view.height)
@@ -741,7 +936,7 @@ class MainActivity : Activity() {
         if (url != null) {
             val iv = ImageView(this)
             iv.scaleType = ImageView.ScaleType.CENTER_CROP
-            iv.setBackgroundColor(Color.rgb(42, 12, 17))
+            iv.setBackgroundColor(KUi.mix(palette.surfaceRaised, Color.BLACK, 0.4f))
             Img.load(url, iv, 256)
             base = iv
         } else {
@@ -749,52 +944,15 @@ class MainActivity : Activity() {
             tv.text = (name.trim().firstOrNull() ?: '?').uppercaseChar().toString()
             tv.gravity = Gravity.CENTER
             tv.textSize = (sizeDp / 2.4f)
+            tv.typeface = KUi.displayTypeface(palette)
             tv.setTextColor(Color.WHITE)
-            tv.setBackgroundColor(Color.rgb(90, 14, 26))
+            tv.setBackgroundColor(KUi.mix(palette.accentLo, Color.BLACK, 0.35f))
             base = tv
         }
         base.outlineProvider = round
         base.clipToOutline = true
-        if (frame == null) {
-            base.layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
-            return base
-        }
-        val fw = Math.max(3, (sizeDp * 0.0625f).toInt())
-        val ukey = Regex("uf-\\d+").find(frame)?.value
-        val uf = Frames.get(ukey)
-        if (uf != null) {
-            val ovd = (sizeDp * (1f + 2f * uf.inset / 100f)).toInt()
-            val bx = FrameLayout(this)
-            bx.clipChildren = false
-            bx.addView(base, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
-            val oi = ImageView(this)
-            oi.scaleType = ImageView.ScaleType.FIT_CENTER
-            Img.load(uf.url, oi, 512)
-            bx.addView(oi, FrameLayout.LayoutParams(dp(ovd), dp(ovd), Gravity.CENTER))
-            bx.layoutParams = LinearLayout.LayoutParams(dp(ovd), dp(ovd))
-            return bx
-        }
-        val tot = sizeDp + fw * 2
-        val box = FrameLayout(this)
-        box.clipChildren = false
-        box.clipToPadding = false
-        box.addView(base, FrameLayout.LayoutParams(dp(sizeDp), dp(sizeDp), Gravity.CENTER))
-        val ov = (sizeDp * Frames.SCALE).toInt()
-        val fi = ImageView(this)
-        fi.scaleType = ImageView.ScaleType.FIT_XY
-        box.addView(fi, FrameLayout.LayoutParams(dp(ov), dp(ov), Gravity.CENTER))
-        Frames.snapshot(frame, sizeDp) { bmp ->
-            if (bmp != null) { fi.alpha = 0f; fi.setImageBitmap(bmp); fi.animate().alpha(1f).setDuration(200).start() }
-            else {
-                val cs = Frames.colorsOf(Regex("uf-\\d+|cx-[0-9a-fA-F]+-[0-9a-fA-F]+|k-frame--([a-z0-9]+)").findAll(frame).map { it.groupValues[1].ifEmpty { it.value } }.lastOrNull())
-                    ?: intArrayOf(violet, Color.rgb(255, 154, 31), violet)
-                val g = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.TRANSPARENT); setStroke(dp(fw), cs[0]) }
-                val rv = View(this); rv.background = g
-                box.addView(rv, FrameLayout.LayoutParams(dp(tot), dp(tot), Gravity.CENTER))
-            }
-        }
-        box.layoutParams = LinearLayout.LayoutParams(dp(tot), dp(tot))
-        return box
+        base.layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+        return base
     }
 
     private fun imageBlock(url: String): ImageView {
@@ -866,7 +1024,8 @@ class MainActivity : Activity() {
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = Gravity.CENTER_VERTICAL
         val n = text(name, size)
-        n.typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+        n.typeface = KUi.displayTypeface(palette)
+        n.letterSpacing = 0.03f * size
         n.maxLines = 1
         n.ellipsize = TextUtils.TruncateAt.END
         row.addView(n, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -891,13 +1050,18 @@ class MainActivity : Activity() {
         window.navigationBarColor = ink
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
+        backdropAnim?.cancel()
+        val bd = KUi.backdrop(palette)
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
-        page.setBackgroundColor(ink)
+        page.background = bd
+        backdropAnim = bd.startAnimating()
         val top = LinearLayout(this)
         top.orientation = LinearLayout.HORIZONTAL
         top.gravity = Gravity.CENTER_VERTICAL
-        top.setPadding(dp(16), dp(12), dp(16), dp(8))
+        top.setPadding(dp(16), dp(12), dp(16), dp(10))
+        top.background = KUi.glass(palette, dp(palette.radiusXl).toFloat(), true)
+        top.elevation = dp(6).toFloat()
         if (back != null) {
             val b = text("‹", 30f, violet)
             b.setPadding(dp(4), 0, dp(14), dp(4))
@@ -910,11 +1074,12 @@ class MainActivity : Activity() {
             k.typeface = Typeface.DEFAULT_BOLD
             k.setTextColor(Color.WHITE)
             k.gravity = Gravity.CENTER
-            k.background = rounded(Color.rgb(60, 12, 20), 10f)
+            k.background = KUi.button(palette, dp(palette.radiusSm).toFloat(), true)
             top.addView(k, LinearLayout.LayoutParams(dp(36), dp(36)).apply { rightMargin = dp(12) })
         }
         val t = text(title, 21f)
-        t.typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+        t.typeface = KUi.displayTypeface(palette)
+        t.letterSpacing = 0.14f * t.textSize
         t.maxLines = 1
         t.ellipsize = TextUtils.TruncateAt.END
         top.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -957,26 +1122,32 @@ class MainActivity : Activity() {
         nav.orientation = LinearLayout.HORIZONTAL
         nav.gravity = Gravity.CENTER
         nav.setPadding(dp(4), dp(8), dp(4), dp(8))
-        nav.background = rounded(Color.rgb(14, 8, 11), 22f)
+        nav.background = KUi.glass(palette, dp(palette.radiusXl).toFloat(), true)
+        nav.elevation = dp(12).toFloat()
         fun slot(name: String, res: Int) {
             val col = LinearLayout(this)
             col.orientation = LinearLayout.VERTICAL
             col.gravity = Gravity.CENTER
-            val color = if (name == tab) violet else muted
-            col.addView(icon(res, color, 24))
-            val l = text(name, 10f, color)
-            l.gravity = Gravity.CENTER
+            val on = name == tab
+            val color = if (on) palette.accentHover else palette.textSoft
+            val ico = icon(res, color, 24)
+            if (on) ico.alpha = 1f else ico.alpha = 0.78f
+            col.addView(ico)
+            val l = text(name, 10f, color).apply {
+                typeface = KUi.displayTypeface(palette)
+                gravity = Gravity.CENTER
+            }
             col.addView(l)
-            col.setOnClickListener { openTab(name) }
+            col.setOnClickListener { KUi.press(col); openTab(name) }
             nav.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
         slot("Início", R.drawable.ic_home)
         slot("Salas", R.drawable.ic_people)
         slot("Servidores", R.drawable.ic_dns)
         val plus = FrameLayout(this)
-        plus.background = rounded(Color.rgb(200, 16, 36), 18f)
+        plus.background = KUi.button(palette, dp(palette.radiusLg).toFloat(), true)
         plus.addView(icon(R.drawable.ic_plus, Color.WHITE, 28), FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
-        plus.setOnClickListener { newPost() }
+        plus.setOnClickListener { KUi.press(plus); newPost() }
         nav.addView(plus, LinearLayout.LayoutParams(dp(54), dp(46)).apply { leftMargin = dp(4); rightMargin = dp(4) })
         slot("Chat", R.drawable.ic_chat)
         slot("Mais", R.drawable.ic_apps)
@@ -996,6 +1167,7 @@ class MainActivity : Activity() {
     private fun showHome(message: String) {
         saveCookies()
         showFeed()
+        syncSiteThemeAsync(token)
         if (message.isNotBlank()) toast("Login confirmado.")
     }
 
@@ -1135,10 +1307,11 @@ class MainActivity : Activity() {
         tabs.orientation = LinearLayout.HORIZONTAL
         for (pair in listOf(Pair("todos", "Todos"), Pair("seguindo", "Seguindo"))) {
             val on = pair.first == mode
-            val b = text(pair.second, 14f, Color.WHITE)
+            val b = text(pair.second, 14f, if (on) Color.WHITE else palette.textSoft)
             b.gravity = Gravity.CENTER
             b.setPadding(dp(18), dp(9), dp(18), dp(9))
-            b.background = rounded(if (on) Color.rgb(60, 12, 20) else Color.rgb(14, 8, 11), 20f)
+            b.typeface = KUi.displayTypeface(palette)
+            b.background = KUi.button(palette, dp(palette.radiusXl).toFloat(), on)
             b.setOnClickListener { if (!on) showFeed(pair.first) }
             tabs.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(8) })
         }
@@ -2607,64 +2780,115 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Telas ainda sem implementação nativa abrem no navegador — nunca dentro de um WebView. */
+    private fun openSite(path: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Net.BASE + path)))
+        } catch (e: Throwable) {
+            toast("Não foi possível abrir esta página.")
+        }
+    }
+
     private fun showMore() {
         val c = screen("Mais", "Mais")
-        val head = LinearLayout(this)
-        head.orientation = LinearLayout.VERTICAL
-        head.gravity = Gravity.CENTER_HORIZONTAL
-        head.setPadding(0, dp(6), 0, dp(14))
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(0, dp(6), 0, dp(16))
+            background = KUi.card(palette, dp(palette.radiusXl).toFloat())
+        }
         head.addView(avatarView(meAvatar, meUser ?: "K", 84))
-        head.addView(text(meUser ?: "", 20f).apply { typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER; setPadding(0, dp(10), 0, 0) })
-        head.addView(text("Toque para ver seu perfil", 12f, muted).apply { gravity = Gravity.CENTER })
+        head.addView(text("@${meUser ?: "você"}", 20f).apply {
+            typeface = KUi.displayTypeface(palette)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(10), 0, 0)
+        })
+        head.addView(text("Toque para ver seu perfil", 12f, palette.textSoft).apply { gravity = Gravity.CENTER })
         head.setOnClickListener { showProfile(null) }
         c.addView(head, params())
 
-        fun group(vararg items: Triple<String, Pair<Int, Int>, () -> Unit>) {
-            val g = LinearLayout(this)
-            g.orientation = LinearLayout.VERTICAL
-            g.background = rounded(palette.surface, palette.radiusLg.toFloat())
-            items.forEachIndexed { i, it ->
-                val row = LinearLayout(this)
-                row.orientation = LinearLayout.HORIZONTAL
-                row.gravity = Gravity.CENTER_VERTICAL
-                row.setPadding(dp(14), dp(12), dp(14), dp(12))
-                val tile = FrameLayout(this)
-                tile.background = rounded(tint(it.second.second, 0.16f), palette.radiusSm.toFloat())
-                tile.addView(icon(it.second.first, it.second.second, 20), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
-                row.addView(tile, LinearLayout.LayoutParams(dp(34), dp(34)))
-                row.addView(text(it.first, 16f).apply { setPadding(dp(14), 0, 0, 0) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                row.addView(text("›", 22f, palette.muted))
-                row.setOnClickListener { _ -> it.third() }
-                g.addView(row)
-                if (i < items.size - 1) g.addView(View(this).apply { setBackgroundColor(tint(palette.border, 0.7f)) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(62) })
+        fun section(caption: String, vararg items: Triple<String, Pair<Int, Int>, () -> Unit>) {
+            val wrap = LinearLayout(this)
+            wrap.orientation = LinearLayout.VERTICAL
+            wrap.addView(text(caption, 11f, palette.accentHover).apply {
+                typeface = KUi.displayTypeface(palette)
+                letterSpacing = 0.32f * textSize
+                setPadding(dp(6), dp(6), 0, dp(6))
+            })
+            val g = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = KUi.card(palette, dp(palette.radiusLg).toFloat())
             }
-            c.addView(g, params().apply { bottomMargin = dp(14) })
+            items.forEachIndexed { i, item ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(14), dp(12), dp(14), dp(12))
+                }
+                val tile = FrameLayout(this).apply {
+                    background = KUi.button(palette, dp(palette.radiusSm).toFloat(), false)
+                }
+                tile.addView(icon(item.second.first, item.second.second, 20),
+                    FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+                row.addView(tile, LinearLayout.LayoutParams(dp(34), dp(34)))
+                row.addView(text(item.first, 16f).apply {
+                    typeface = KUi.bodyTypeface(palette)
+                    setPadding(dp(14), 0, 0, 0)
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                row.addView(text("›", 22f, palette.muted))
+                row.setOnClickListener { KUi.press(row); item.third() }
+                g.addView(row)
+                if (i < items.size - 1) {
+                    g.addView(View(this).apply {
+                        setBackgroundColor(KUi.alpha(palette.border, 0.7f))
+                    }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(62) })
+                }
+            }
+            wrap.addView(g)
+            c.addView(wrap, params().apply { bottomMargin = dp(12) })
         }
-        val green = palette.success
+
         val red = palette.accent
+        val green = palette.success
         val blue = palette.info
-        val orange = Color.rgb(245, 124, 0)
-        val yellow = Color.rgb(212, 160, 0)
+        val gold = Color.rgb(212, 160, 0)
         val pink = Color.rgb(214, 51, 132)
-        val gray = palette.muted
-        group(
+
+        section("EXPLORAR",
+            Triple("Descobrir", Pair(R.drawable.ic_info, blue)) { openSite("/discover") },
+            Triple("Comunidades", Pair(R.drawable.ic_people, green)) { openSite("/comunidades") },
+            Triple("Servidores", Pair(R.drawable.ic_dns, pink)) { showServers() },
+            Triple("Convites 🔥", Pair(R.drawable.ic_crown, red)) { openSite("/convites") },
+        )
+        section("MISSÕES E PROGRESSO",
+            Triple("Missões", Pair(R.drawable.ic_seal, green)) { showTasks() },
+            Triple("Conquistas", Pair(R.drawable.ic_crown, gold)) { showBadges() },
+            Triple("Criações", Pair(R.drawable.ic_apps, pink)) { openSite("/criacoes") },
             Triple("Meu perfil", Pair(R.drawable.ic_people, red)) { showProfile(null) },
-            Triple("Notificações", Pair(R.drawable.ic_bell, orange)) { showNotifs() },
-            Triple("Conquistas", Pair(R.drawable.ic_crown, yellow)) { showBadges() },
-            Triple("Tarefas", Pair(R.drawable.ic_seal, green)) { showTasks() }
         )
-        group(
-            Triple("Loja", Pair(R.drawable.ic_crown, pink)) { showShop() },
+        section("BOLSA E JOGOS",
+            Triple("Bolsa K", Pair(R.drawable.ic_seal, gold)) { openSite("/bolsa") },
             Triple("Carteira", Pair(R.drawable.ic_seal, blue)) { showWallet() },
-            Triple("Jogos", Pair(R.drawable.ic_apps, green)) { showGames() }
+            Triple("Jogo do gráfico", Pair(R.drawable.ic_apps, red)) { openSite("/casino") },
+            Triple("Mines", Pair(R.drawable.ic_dns, red)) { openSite("/mines") },
+            Triple("Cobrinha", Pair(R.drawable.ic_apps, green)) { openSite("/cobrinha") },
+            Triple("Arcade", Pair(R.drawable.ic_apps, pink)) { openSite("/arcade") },
         )
-        val last = ArrayList<Triple<String, Pair<Int, Int>, () -> Unit>>()
-        last.add(Triple("Configurações", Pair(R.drawable.ic_shield, gray)) { showSettings() })
-        if (isAdminUser) last.add(Triple("Painel admin", Pair(R.drawable.ic_shield, red)) { showAdmin() })
-        last.add(Triple("Atualização do app", Pair(R.drawable.ic_dns, blue)) { checkUpdate(true) })
-        last.add(Triple("Sair da conta", Pair(R.drawable.ic_plus, red)) { logout() })
-        group(*last.toTypedArray())
-        addLine(c, "Versão " + try { packageManager.getPackageInfo(packageName, 0).versionCode } catch (e: Throwable) { 0 }, 12f, muted)
+        section("CONTA",
+            Triple("Loja", Pair(R.drawable.ic_crown, pink)) { showShop() },
+            Triple("Notificações", Pair(R.drawable.ic_bell, gold)) { showNotifs() },
+            Triple("Configurações", Pair(R.drawable.ic_shield, palette.muted)) { showSettings() },
+            Triple("Atualização do app", Pair(R.drawable.ic_dns, blue)) { checkUpdate(true) },
+            Triple("Sair da conta", Pair(R.drawable.ic_plus, red)) { logout() },
+        )
+        if (isAdminUser) {
+            section("ADMIN",
+                Triple("Painel admin", Pair(R.drawable.ic_shield, red)) { showAdmin() },
+            )
+        }
+        addLine(c, "Versão " + try {
+            packageManager.getPackageInfo(packageName, 0).versionCode
+        } catch (e: Throwable) { 0 }, 12f, palette.muted)
     }
 
     private fun showNotifs() {
