@@ -19,6 +19,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -1884,7 +1885,7 @@ class MainActivity : Activity() {
                 b.addView(text(pair.second, 24f).apply { typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER }, params().apply { topMargin = dp(6) })
                 grid.addView(b, LinearLayout.LayoutParams(0, -2, 1f).apply { if (i == 0) rightMargin = dp(6) else leftMargin = dp(6) })
             }
-            c.addView(grid, params().apply { topMargin = dp(6), bottomMargin = dp(14) })
+            c.addView(grid, params().apply { topMargin = dp(6); bottomMargin = dp(14) })
 
             val exchange = groupCard(c)
             addLine(exchange, "Trocar", 16f, palette.text)
@@ -1903,7 +1904,7 @@ class MainActivity : Activity() {
             }
             actions.addView(buy, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(5) })
             actions.addView(sell, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(5) })
-            exchange.addView(actions, params().apply { topMargin = dp(6), bottomMargin = dp(10) })
+            exchange.addView(actions, params().apply { topMargin = dp(6); bottomMargin = dp(10) })
 
             val hist = groupCard(c)
             addLine(hist, "Histórico", 16f, palette.text)
@@ -1914,7 +1915,7 @@ class MainActivity : Activity() {
                 val left = LinearLayout(this)
                 left.orientation = LinearLayout.VERTICAL
                 left.addView(text(r.label, 14f))
-                left.addView(text(r.when, 11f, palette.muted))
+                left.addView(text(r.whenText, 11f, palette.muted))
                 row.addView(left, LinearLayout.LayoutParams(0, -2, 1f))
                 val right = LinearLayout(this)
                 right.orientation = LinearLayout.VERTICAL
@@ -2072,7 +2073,10 @@ class MainActivity : Activity() {
 
     private fun showGames() {
         val c = screen("Mais", "Jogos", back = { showMore() })
+        val st = skeleton()
+        c.addView(st)
         async({ NativeData.games(NativeData.doc(Net.get("/jogos").body)) }, { games ->
+            c.removeView(st)
             sectionTitle(c, "ARCADE", "Jogos")
             addLine(c, "Entre, jogue e ganhe kcoin. Os placares são sempre validados pelo servidor.", 12f, palette.textSoft)
             val all = games.ifEmpty {
@@ -2270,7 +2274,7 @@ class MainActivity : Activity() {
         val c = screen("Mais", "Discord", back = { showSettings() })
         sectionTitle(c, "DISCORD", "Sua conta Discord")
         addLine(c, "Avinque o Discord para entrar com um clique e receber avisos no seu privado.", 12f, palette.textSoft)
-        c.addView(pill("Ligar / entrar com Discord") { discordLogin() }, params().apply { topMargin = dp(6), bottomMargin = dp(14) })
+        c.addView(pill("Ligar / entrar com Discord") { discordLogin() }, params().apply { topMargin = dp(6); bottomMargin = dp(14) })
         val g = groupCard(c)
         row(g, R.drawable.ic_bell, Color.rgb(88, 101, 242), "Ativar avisos por DM") {
             submitForm("/discord/dm", listOf("on" to "1")) { toast("Avisos atualizados.") }
@@ -2438,7 +2442,7 @@ class MainActivity : Activity() {
             }
             head.addView(statsRow, params().apply { topMargin = dp(12) })
         }
-        c.addView(head, params().apply { topMargin = dp(-18), bottomMargin = dp(14) })
+        c.addView(head, params().apply { topMargin = dp(-18); bottomMargin = dp(14) })
     }
 
     private fun showProfile(username: String?) {

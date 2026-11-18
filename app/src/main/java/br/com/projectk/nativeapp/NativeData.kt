@@ -8,7 +8,7 @@ import org.jsoup.nodes.Element
 
 data class LedgerEntry(
     val label: String,
-    val when: String,
+    val whenText: String,
     val kcoin: String,
     val crystals: String,
 )
@@ -96,7 +96,7 @@ object NativeData {
         for (row in d.select("div.notification-item")) {
             val left = row.select("div").firstOrNull() ?: continue
             val label = left.select("div").firstOrNull()?.text()?.trim().orEmpty()
-            val when = left.select("time").firstOrNull()?.text()?.trim().orEmpty()
+            val whenText = left.select("time").firstOrNull()?.text()?.trim().orEmpty()
             if (label.isBlank()) continue
             val right = row.select("div").getOrNull(1)
             var kc = ""
@@ -108,7 +108,7 @@ object NativeData {
                     else if (v.contains("cristal", true)) cr = v
                 }
             }
-            history.add(LedgerEntry(label, when, kc, cr))
+            history.add(LedgerEntry(label, whenText, kc, cr))
         }
         return WalletInfo(kcoin, crystals, buy, sell, history)
     }
@@ -138,7 +138,7 @@ object NativeData {
                 items.add(TaskInfo(key, title, desc, progress, reward, state))
             }
             if (items.isNotEmpty()) {
-                out.add(labels.getOrNull(idx) ?: "TAREFAS" to items)
+                out.add((labels.getOrNull(idx) ?: "TAREFAS") to items)
             }
         }
         return out
@@ -253,8 +253,8 @@ object NativeData {
                 honorName = o.optString("name").takeIf { it.isNotBlank() }
                 honorArt = o.optString("image").takeIf { it.isNotBlank() }
             } catch (_: Throwable) {
-                honorName = honor.select("span.k-honor-name").firstOrNull()?.text()?.trim()
-                honorArt = honor.select("img.k-honor-art").firstOrNull()?.absUrl("src")
+                honorName = honor?.select("span.k-honor-name")?.firstOrNull()?.text()?.trim()
+                honorArt = honor?.select("img.k-honor-art")?.firstOrNull()?.absUrl("src")
             }
         }
         val status = d.select("div.pst-b").firstOrNull()?.text()?.trim()?.takeIf { it.isNotBlank() }
