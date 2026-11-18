@@ -19,6 +19,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -38,9 +39,9 @@ import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
     private val baseUrl = Net.BASE
-    private val red = Color.rgb(220, 35, 55)
-    private val bg = Color.rgb(18, 18, 22)
-    private val panel = Color.rgb(29, 29, 35)
+    private var red = Color.rgb(220, 35, 55)
+    private var bg = Color.rgb(18, 18, 22)
+    private var panel = Color.rgb(29, 29, 35)
 
     private lateinit var root: LinearLayout
     private lateinit var status: TextView
@@ -49,11 +50,24 @@ class MainActivity : Activity() {
     private lateinit var loginButton: Button
     private var busy = false
 
-    private val ink = Color.rgb(7, 5, 10)
-    private val glass = Color.rgb(18, 10, 13)
-    private val muted = Color.rgb(169, 154, 157)
-    private val violet = Color.rgb(225, 29, 46)
-    private val errorColor = Color.rgb(255, 120, 130)
+    private var ink = Color.rgb(7, 5, 10)
+    private var glass = Color.rgb(18, 10, 13)
+    private var muted = Color.rgb(169, 154, 157)
+    private var violet = Color.rgb(225, 29, 46)
+    private var errorColor = Color.rgb(255, 120, 130)
+    private lateinit var palette: KPalette
+
+    private fun applyTheme() {
+        palette = KTheme.current(this)
+        red = palette.accent
+        bg = palette.bg
+        panel = palette.surfaceRaised
+        ink = palette.bg
+        glass = palette.surface
+        muted = palette.muted
+        violet = palette.accent
+        errorColor = palette.danger
+    }
 
     private val handler = Handler(Looper.getMainLooper())
     private var token = 0
@@ -70,6 +84,7 @@ class MainActivity : Activity() {
     private var pickedLabel: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        applyTheme()
         Img.init(applicationContext)
         try {
             androidx.work.WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
@@ -82,12 +97,16 @@ class MainActivity : Activity() {
         }
         super.onCreate(savedInstanceState)
 
-        window.statusBarColor = bg
-        window.navigationBarColor = bg
-
+        // Configura a jarra de cookies ANTES do deep link: o callback do Discord
+        // precisa gravar a sessão mesmo quando o app abre do zero pelo navegador.
         CookieHandler.setDefault(
             CookieManager(null, CookiePolicy.ACCEPT_ALL)
         )
+
+        if (handleDiscordOnCreate(intent)) return
+
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
 
         if (restoreCookies()) {
             val splash = TextView(this).apply {
@@ -181,6 +200,10 @@ class MainActivity : Activity() {
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
 
+    private fun tint(color: Int, alpha: Float): Int = Color.argb(
+        (255 * alpha).toInt(), Color.red(color), Color.green(color), Color.blue(color)
+    )
+
     private fun params() = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT
@@ -190,7 +213,7 @@ class MainActivity : Activity() {
         TextView(this).apply {
             this.text = text
             textSize = size
-            setTextColor(Color.WHITE)
+            setTextColor(palette.text)
         }
 
     private fun makeRoot(): LinearLayout {
@@ -216,11 +239,11 @@ class MainActivity : Activity() {
         return EditText(this).apply {
             hint = hintText
             textSize = 15f
-            setTextColor(Color.WHITE)
-            setHintTextColor(Color.rgb(145, 145, 155))
+            setTextColor(palette.text)
+            setHintTextColor(palette.muted)
             setSingleLine(true)
             setPadding(dp(14), dp(12), dp(14), dp(12))
-            setBackgroundColor(panel)
+            setBackgroundColor(palette.surfaceRaised)
             if (password) {
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or
                     android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -323,39 +346,173 @@ class MainActivity : Activity() {
         try { loginButton.alpha = 1f; loginButton.text = "Entrar" } catch (e: Throwable) {}
     }
 
+    /**
+     * Login Discord 100% nativo: o app abre o OAuth no navegador do celular e
+     * o site devolve o controle por deep link projectk://discord com um ticket
+     * assinado. Nenhum WebView fica dentro do app.
+     */
     private fun discordLogin() {
-        val dlg = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        val wv = android.webkit.WebView(this)
-        wv.settings.javaScriptEnabled = true
-        wv.settings.domStorageEnabled = true
-        val cm = android.webkit.CookieManager.getInstance()
-        cm.setAcceptCookie(true)
-        var done = false
-        wv.webViewClient = object : android.webkit.WebViewClient() {
-            override fun onPageFinished(v: android.webkit.WebView, url: String?) {
-                if (done || url == null) return
-                val u = android.net.Uri.parse(url)
-                if (u.host == android.net.Uri.parse(Net.BASE).host && (u.path == "/home" || u.path == "/home/")) {
-                    done = true
-                    try {
-                        val store = (CookieHandler.getDefault() as CookieManager).cookieStore
-                        (cm.getCookie(Net.BASE) ?: "").split(";").forEach { kv ->
-                            val p = kv.trim().split("=", limit = 2)
-                            if (p.size == 2 && p[0].isNotBlank()) {
-                                val hc = HttpCookie(p[0], p[1]); hc.path = "/"
-                                store.add(URI(Net.BASE), hc)
-                            }
-                        }
-                        saveCookies()
-                    } catch (e: Throwable) {}
-                    dlg.dismiss()
-                    showHome("")
+        val raw = ByteArray(24)
+        java.security.SecureRandom().nextBytes(raw)
+        val state = android.util.Base64.encodeToString(raw, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP)
+            .trimEnd('=')
+        prefs().edit().putString("discord_state", state).apply()
+        val url = Net.BASE + "/app/discord/start?s=" + enc(state) + "&r=projz"
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            toast("Continue no navegador. Volte ao app quando autorizar.")
+        } catch (e: Throwable) {
+            toast("Não foi possível abrir o navegador.")
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDiscordCallback(intent)
+    }
+
+    private fun handleDiscordOnCreate(i: Intent?): Boolean {
+        val u = i?.data ?: return false
+        if (!"projz".equals(u.scheme, true) || !"discord".equals(u.host, true)) return false
+        handleDiscordCallback(i)
+        return true
+    }
+
+    private fun handleDiscordCallback(i: Intent?) {
+        val u = i?.data ?: return
+        if (!"projz".equals(u.scheme, true) || !"discord".equals(u.host, true)) return
+        val state = u.getQueryParameter("s").orEmpty()
+        val ticket = u.getQueryParameter("t").orEmpty()
+        val error = u.getQueryParameter("err")
+        if (!error.isNullOrBlank()) {
+            val msg = when (error) {
+                "off" -> "O login com Discord não está disponível no site."
+                "discord" -> "O Discord não respondeu. Tente de novo."
+                "banido" -> "Esta conta está suspensa."
+                "email" -> "Já existe conta com esse e-mail. Entre com senha e ligue o Discord em Configurações."
+                "oauth" -> "Autorização cancelada ou expirada."
+                else -> "Não foi possível entrar com o Discord."
+            }
+            toast(msg)
+            showLogin()
+            return
+        }
+        val expected = prefs().getString("discord_state", null)
+        if (expected == null || expected != state || state.isBlank()) {
+            toast("Pedido de login inválido. Tente de novo.")
+            return
+        }
+        prefs().edit().remove("discord_state").apply()
+        if (u.getQueryParameter("need") == "1" || ticket.isBlank()) {
+            showDiscordSignup(state, ticket)
+        } else {
+            finishDiscordLogin(state, ticket)
+        }
+    }
+
+    private fun finishDiscordLogin(state: String, ticket: String) {
+        val wait = TextView(this).apply {
+            text = "Entrando com Discord…"
+            textSize = 16f
+            setTextColor(palette.text)
+            gravity = Gravity.CENTER
+            setBackgroundColor(bg)
+        }
+        setContentView(wait)
+        thread {
+            var msg: String? = null
+            try {
+                val r = Net.postJson(
+                    "/app/discord/session",
+                    JSONObject().put("s", state).put("t", ticket),
+                )
+                val o = JSONObject(r.body)
+                if (!o.optBoolean("ok")) {
+                    msg = o.optString("error").ifBlank { "Não foi possível concluir o login." }
+                } else {
+                    saveCookies()
+                    meUser = null
+                }
+            } catch (e: SessionExpired) {
+                msg = "Sessão expirada. Tente de novo."
+            } catch (e: Throwable) {
+                msg = "Falha ao entrar: ${e.message}"
+            }
+            val failure = msg
+            runOnUiThread {
+                if (failure == null) showHome("") else {
+                    toast(failure)
+                    showLogin()
                 }
             }
         }
-        dlg.setContentView(wv)
+    }
+
+    private fun showDiscordSignup(state: String, ticket: String) {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(20), dp(22), dp(8))
+            setBackgroundColor(palette.surface)
+        }
+        box.addView(text("Escolha seu @ para entrar", 17f).apply {
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 0, 0, dp(6))
+        })
+        box.addView(text("Sua conta Discord foi autorizada. Falta só o @ e a data de nascimento.", 13f, palette.textSoft))
+        val user = fieldBox("usuário (somente letras, números e _)")
+        val birth = fieldBox("data de nascimento (AAAA-MM-DD)")
+        box.addView(user, params().apply { topMargin = dp(14) })
+        box.addView(birth)
+        val error = text("", 12f, errorColor)
+        box.addView(error, params().apply { topMargin = dp(4) })
+
+        val dlg = android.app.AlertDialog.Builder(this)
+            .setTitle("Novo no K")
+            .setView(box)
+            .setCancelable(false)
+            .setPositiveButton("Criar conta", null)
+            .setNegativeButton("Cancelar") { _, _ -> showLogin() }
+            .create()
+        dlg.setOnShowListener {
+            dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val uname = user.text.toString().trim()
+                val data = birth.text.toString().trim()
+                if (uname.length < 3 || !uname.all { it.isLetterOrDigit() || it == '_' }) {
+                    error.text = "O @ precisa de 3+ caracteres: letras, números e _."
+                    return@setOnClickListener
+                }
+                if (!Regex("\\d{4}-\\d{2}-\\d{2}").matches(data)) {
+                    error.text = "Informe a data no formato AAAA-MM-DD."
+                    return@setOnClickListener
+                }
+                dlg.dismiss()
+                thread {
+                    var newTicket: String? = null
+                    var msg: String? = null
+                    try {
+                        val r = Net.postJson(
+                            "/app/discord/complete",
+                            JSONObject()
+                                .put("s", state).put("t", ticket)
+                                .put("username", uname).put("birth_date", data),
+                        )
+                        val o = JSONObject(r.body)
+                        if (o.optBoolean("ok")) newTicket = o.optString("t")
+                        else msg = o.optString("error").ifBlank { "Não foi possível criar a conta." }
+                    } catch (e: Throwable) {
+                        msg = "Falha: ${e.message}"
+                    }
+                    val fail = msg
+                    val nt = newTicket
+                    runOnUiThread {
+                        if (nt != null) finishDiscordLogin(state, nt)
+                        else { toast(fail ?: "Falha ao criar a conta."); showLogin() }
+                    }
+                }
+            }
+        }
         dlg.show()
-        wv.loadUrl(Net.BASE + "/auth/discord")
     }
 
     private fun login() {
@@ -460,11 +617,11 @@ class MainActivity : Activity() {
         return GradientDrawable().apply {
             setColor(color)
             cornerRadius = radius * resources.displayMetrics.density
-            setStroke(dp(1), Color.argb(80, 225, 29, 46))
+            setStroke(dp(1), if (palette.light) palette.borderStrong else tint(palette.borderStrong, 0.45f))
         }
     }
 
-    private fun text(value: String, size: Float = 14f, color: Int = Color.WHITE): TextView {
+    private fun text(value: String, size: Float = 14f, color: Int = palette.text): TextView {
         return TextView(this).apply {
             text = value
             textSize = size
@@ -477,20 +634,27 @@ class MainActivity : Activity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(15), dp(13), dp(15), dp(13))
-            background = rounded(glass)
+            background = rounded(palette.surface, palette.radiusMd.toFloat())
             layoutParams = params().apply { bottomMargin = dp(11) }
         }
     }
 
-    private fun addLine(parent: LinearLayout, value: String, size: Float = 14f, color: Int = Color.WHITE) {
+    private fun addLine(parent: LinearLayout, value: String, size: Float = 14f, color: Int = palette.text) {
         parent.addView(text(value, size, color), params().apply { bottomMargin = dp(5) })
     }
 
+    private fun eyebrow(parent: LinearLayout, value: String) {
+        parent.addView(text(value.uppercase(), 11f, palette.accent).apply {
+            typeface = Typeface.DEFAULT_BOLD
+            letterSpacing = 0.14f
+        }, params().apply { bottomMargin = dp(6) })
+    }
+
     private fun pill(value: String, action: () -> Unit): TextView {
-        return text(value, 13f, Color.WHITE).apply {
+        return text(value, 13f, palette.text).apply {
             gravity = Gravity.CENTER
             setPadding(dp(14), dp(10), dp(14), dp(10))
-            background = rounded(Color.rgb(42, 12, 17), 18f)
+            background = rounded(tint(palette.accent, 0.18f), palette.radiusMd.toFloat())
             setOnClickListener { action() }
         }
     }
@@ -502,11 +666,11 @@ class MainActivity : Activity() {
     private fun fieldBox(hintText: String, multi: Boolean = false): EditText {
         return EditText(this).apply {
             hint = hintText
-            setHintTextColor(muted)
-            setTextColor(Color.WHITE)
+            setHintTextColor(palette.muted)
+            setTextColor(palette.text)
             textSize = 15f
             setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = rounded(glass, 16f)
+            background = rounded(palette.surfaceRaised, palette.radiusMd.toFloat())
             if (multi) {
                 minLines = 4
                 gravity = Gravity.TOP
@@ -543,13 +707,13 @@ class MainActivity : Activity() {
             r.orientation = LinearLayout.HORIZONTAL
             r.setPadding(0, dp(10), 0, dp(10))
             val av = View(this)
-            av.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.rgb(34, 16, 20)) }
+            av.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(palette.surfaceHover) }
             r.addView(av, LinearLayout.LayoutParams(dp(40), dp(40)))
             val col = LinearLayout(this)
             col.orientation = LinearLayout.VERTICAL
             for (w in intArrayOf(140, 260, 200)) {
                 val bar = View(this)
-                bar.background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(Color.rgb(34, 16, 20)) }
+                bar.background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(palette.surfaceHover) }
                 col.addView(bar, LinearLayout.LayoutParams(dp(w), dp(10)).apply { topMargin = dp(7) })
             }
             r.addView(col, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(12) })
@@ -1623,167 +1787,662 @@ class MainActivity : Activity() {
         }, { m -> st.text = "Falha ao abrir: $m"; st.setTextColor(errorColor) })
     }
 
-    // ---------- Perfil ----------
-    private fun showProfileOld(username: String?) {
-        val mine = username == null || username == meUser
-        val backFn: (() -> Unit)? = if (mine) null else fun() { showFeed() }
-        val c = screen("Mais", if (mine) "Meu perfil" else "@$username", back = backFn)
+    // ---------- Telas nativas do K ----------
+
+    private fun remoteImage(url: String?, heightDp: Int): ImageView {
+        val iv = ImageView(this)
+        iv.scaleType = ImageView.ScaleType.CENTER_CROP
+        iv.setBackgroundColor(palette.surfaceRaised)
+        if (url != null) Img.load(url, iv, 512)
+        iv.layoutParams = LinearLayout.LayoutParams(-1, dp(heightDp))
+        return iv
+    }
+
+    private fun sectionTitle(parent: LinearLayout, eyebrow: String, title: String) {
+        eyebrow(parent, eyebrow)
+        addLine(parent, title, 22f, palette.text)
+    }
+
+    private fun groupCard(parent: LinearLayout): LinearLayout {
+        val g = LinearLayout(this)
+        g.orientation = LinearLayout.VERTICAL
+        g.background = rounded(palette.surface, palette.radiusMd.toFloat())
+        g.setPadding(dp(14), dp(6), dp(14), dp(6))
+        parent.addView(g, params().apply { bottomMargin = dp(14) })
+        return g
+    }
+
+    private fun row(
+        parent: LinearLayout, iconRes: Int, iconColor: Int, label: String,
+        hint: String? = null, action: (() -> Unit)? = null,
+    ): LinearLayout {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(dp(2), dp(13), dp(2), dp(13))
+        val tile = FrameLayout(this)
+        tile.background = rounded(tint(iconColor, 0.16f), palette.radiusSm.toFloat())
+        tile.addView(icon(iconRes, iconColor, 18), FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
+        row.addView(tile, LinearLayout.LayoutParams(dp(34), dp(34)))
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.addView(text(label, 15f), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(13) })
+        if (hint != null) col.addView(text(hint, 12f, palette.muted), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(13) })
+        row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        if (action != null) {
+            row.addView(text("›", 22f, palette.muted))
+            row.setOnClickListener { action() }
+        }
+        parent.addView(row)
+        parent.addView(View(this).apply { setBackgroundColor(tint(palette.border, 0.7f)) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(50) })
+        return row
+    }
+
+    private fun submitForm(
+        path: String,
+        fields: List<Pair<String, String>>,
+        accept: String = "text/html",
+        onDone: () -> Unit,
+    ) {
+        thread {
+            var failure: String? = null
+            try {
+                val r = Net.postForm(path, fields, accept)
+                if (r.code >= 400) failure = "HTTP ${r.code}"
+            } catch (e: SessionExpired) {
+                failure = "Sessão expirada. Entre novamente."
+            } catch (e: Throwable) {
+                failure = e.message ?: "Falha na operação."
+            }
+            val f = failure
+            runOnUiThread {
+                if (f == null) onDone() else {
+                    toast(f)
+                    if (f.contains("Sessão")) sessionLost()
+                }
+            }
+        }
+    }
+
+    private fun showWallet() {
+        val c = screen("Mais", "Carteira", back = { showMore() })
         val st = skeleton()
         c.addView(st)
-        async({
-            var u = username ?: meUser
-            if (u == null) {
-                u = Parse.meUsername(Parse.doc(Net.get("/settings/profile").body)) ?: throw Exception("Não consegui identificar sua conta.")
-                meUser = u
-            }
-            u
-        }, { u ->
+        async({ NativeData.wallet(NativeData.doc(Net.get("/carteira").body)) }, { w ->
             c.removeView(st)
-            openWebProfile(c, u)
-        }, { m -> st.text = "Falha ao abrir: $m"; st.setTextColor(errorColor) })
+            sectionTitle(c, "CARTEIRA", "Seus saldos")
+
+            val grid = LinearLayout(this)
+            grid.orientation = LinearLayout.HORIZONTAL
+            grid.weightSum = 2f
+            listOf("kcoin" to w.kcoin, "cristais" to w.crystals).forEachIndexed { i, pair ->
+                val b = LinearLayout(this)
+                b.orientation = LinearLayout.VERTICAL
+                b.gravity = Gravity.CENTER
+                b.setPadding(dp(10), dp(18), dp(10), dp(18))
+                b.background = rounded(palette.surface, palette.radiusMd.toFloat())
+                b.addView(text(pair.first.uppercase(), 11f, palette.accent).apply { typeface = Typeface.DEFAULT_BOLD })
+                b.addView(text(pair.second, 24f).apply { typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER }, params().apply { topMargin = dp(6) })
+                grid.addView(b, LinearLayout.LayoutParams(0, -2, 1f).apply { if (i == 0) rightMargin = dp(6) else leftMargin = dp(6) })
+            }
+            c.addView(grid, params().apply { topMargin = dp(6); bottomMargin = dp(14) })
+
+            val exchange = groupCard(c)
+            addLine(exchange, "Trocar", 16f, palette.text)
+            addLine(exchange, "Compra: 1 cristal = ${w.buyRate} kcoin.\nVenda: 1 cristal = ${w.sellRate} kcoin.\nA venda tem taxa de 10%.", 12f, palette.textSoft)
+            val qty = fieldBox("quantidade")
+            qty.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            qty.setText("1")
+            exchange.addView(qty, params().apply { topMargin = dp(8) })
+            val actions = LinearLayout(this)
+            actions.orientation = LinearLayout.HORIZONTAL
+            val buy = pill("Comprar cristais") {
+                submitForm("/carteira", listOf("qty" to qty.text.toString(), "action" to "buy")) { showWallet() }
+            }
+            val sell = pill("Vender cristais") {
+                submitForm("/carteira", listOf("qty" to qty.text.toString(), "action" to "sell")) { showWallet() }
+            }
+            actions.addView(buy, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(5) })
+            actions.addView(sell, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(5) })
+            exchange.addView(actions, params().apply { topMargin = dp(6); bottomMargin = dp(10) })
+
+            val hist = groupCard(c)
+            addLine(hist, "Histórico", 16f, palette.text)
+            if (w.history.isEmpty()) addLine(hist, "Nenhuma movimentação ainda.", 13f, palette.muted)
+            for (r in w.history) {
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                val left = LinearLayout(this)
+                left.orientation = LinearLayout.VERTICAL
+                left.addView(text(r.label, 14f))
+                left.addView(text(r.whenText, 11f, palette.muted))
+                row.addView(left, LinearLayout.LayoutParams(0, -2, 1f))
+                val right = LinearLayout(this)
+                right.orientation = LinearLayout.VERTICAL
+                right.gravity = Gravity.END
+                if (r.kcoin.isNotBlank()) right.addView(text(r.kcoin, 12f, palette.success))
+                if (r.crystals.isNotBlank()) right.addView(text(r.crystals, 12f, palette.info))
+                row.addView(right)
+                row.setPadding(dp(2), dp(11), dp(2), dp(11))
+                hist.addView(row)
+                hist.addView(View(this).apply { setBackgroundColor(tint(palette.border, 0.7f)) }, LinearLayout.LayoutParams(-1, 1))
+            }
+            hist.setPadding(dp(14), dp(6), dp(14), dp(10))
+        }, { m -> st.text = "Falha ao carregar a carteira: $m" })
     }
 
-    private fun openWebHeader(c: LinearLayout, u: String) {
-        try {
-            val cm = android.webkit.CookieManager.getInstance()
-            cm.setAcceptCookie(true)
-            (java.net.CookieHandler.getDefault() as? java.net.CookieManager)?.cookieStore?.cookies?.forEach {
-                cm.setCookie(Net.BASE, it.name + "=" + it.value + "; Path=/")
+    private fun showTasks() {
+        val c = screen("Mais", "Tarefas", back = { showMore() })
+        val st = skeleton()
+        c.addView(st)
+        async({ NativeData.tasks(NativeData.doc(Net.get("/tarefas").body)) }, { groups ->
+            c.removeView(st)
+            sectionTitle(c, "GANHE KCOIN", "Tarefas")
+            for ((section, items) in groups) {
+                eyebrow(c, section)
+                val g = groupCard(c)
+                for (t in items) {
+                    val row = LinearLayout(this)
+                    row.orientation = LinearLayout.VERTICAL
+                    row.setPadding(dp(2), dp(12), dp(2), dp(12))
+                    row.addView(text(t.title, 15f).apply { typeface = Typeface.DEFAULT_BOLD })
+                    row.addView(text(t.desc, 12f, palette.textSoft).apply { setPadding(0, dp(3), 0, 0) })
+                    if (t.progress != null) {
+                        val barBg = View(this)
+                        barBg.background = rounded(palette.surfaceHover, 6f)
+                        row.addView(barBg, LinearLayout.LayoutParams(-1, dp(5)).apply { topMargin = dp(8) })
+                        val bar = View(this)
+                        bar.background = rounded(palette.accent, 6f)
+                        row.addView(bar, LinearLayout.LayoutParams(dp((t.progress.toIntOrNull() ?: 0) * 3), dp(5)).apply { topMargin = dp(-5) })
+                    }
+                    val actionRow = LinearLayout(this)
+                    actionRow.orientation = LinearLayout.HORIZONTAL
+                    actionRow.gravity = Gravity.CENTER_VERTICAL
+                    actionRow.addView(text("+${t.reward} kcoin", 14f, palette.success).apply { typeface = Typeface.DEFAULT_BOLD }, LinearLayout.LayoutParams(0, -2, 1f).apply { topMargin = dp(8) })
+                    when (t.state) {
+                        "done" -> actionRow.addView(text("✓ feito", 12f, palette.muted))
+                        "ready" -> actionRow.addView(pill("Pegar") {
+                            submitForm("/tarefas", listOf("task" to t.key)) { showTasks() }
+                        })
+                        else -> actionRow.addView(text("Pendente", 12f, palette.muted))
+                    }
+                    row.addView(actionRow, params().apply { topMargin = dp(6) })
+                    g.addView(row)
+                    g.addView(View(this).apply { setBackgroundColor(tint(palette.border, 0.7f)) }, LinearLayout.LayoutParams(-1, 1))
+                }
             }
-            cm.flush()
-        } catch (e: Throwable) {}
-        val wv = android.webkit.WebView(this)
-        wv.setBackgroundColor(Color.rgb(7, 5, 10))
-        wv.settings.javaScriptEnabled = true
-        wv.settings.userAgentString = wv.settings.userAgentString + " ProjectKApp"
-        wv.settings.domStorageEnabled = true
-        wv.overScrollMode = View.OVER_SCROLL_NEVER
-        wv.isVerticalScrollBarEnabled = false
-        wv.setOnTouchListener { v, ev -> ev.action == android.view.MotionEvent.ACTION_MOVE }
-        val css = "header.topbar,.k-side,nav.top-navigation,footer.mobile-navigation,.k-sheet,#k-more-btn{display:none!important}" +
-            ".z-profile-actions,.z-profile-bio,.z-profile-meta,.z-profile-tabs,.z-profile-tabs~*{display:none!important}" +
-            "html,body{background:#07050a!important;margin:0!important;padding:0!important;overflow:hidden!important}" +
-            ".main-content{margin:0!important;padding:0!important;max-width:100%!important;width:100%!important}" +
-            "*{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}body::before,body::after,.aurora,#aurora{display:none!important}"
-        val js = "(function(){if(!document.getElementById('kapp')){var s=document.createElement('style');s.id='kapp';s.textContent=" + org.json.JSONObject.quote(css) + ";document.head.appendChild(s);}return document.body.scrollHeight;})()"
-        val lp = LinearLayout.LayoutParams(-1, dp(420))
-        fun fit(v: android.webkit.WebView) {
-            v.evaluateJavascript(js) { r ->
-                val px = r?.trim('"')?.toFloatOrNull()
-                if (px != null && px > 50) { lp.height = (px * resources.displayMetrics.density).toInt() + dp(8); v.layoutParams = lp }
-            }
-        }
-        wv.webViewClient = object : android.webkit.WebViewClient() {
-            override fun onPageStarted(v: android.webkit.WebView, url: String?, f: android.graphics.Bitmap?) { fit(v) }
-            override fun onPageFinished(v: android.webkit.WebView, url: String?) {
-                fit(v)
-                v.postDelayed({ fit(v) }, 700)
-                v.postDelayed({ fit(v) }, 1800)
-            }
-            override fun shouldOverrideUrlLoading(v: android.webkit.WebView, r: android.webkit.WebResourceRequest): Boolean = true
-        }
-        c.addView(wv, lp)
-        wv.loadUrl(Net.BASE + "/u/" + enc(u) + "?app=1")
+        }, { m -> st.text = "Falha ao carregar as tarefas: $m" })
     }
 
-    private fun openWebProfile(c: LinearLayout, u: String) = openWeb(c, "/u/" + enc(u), "/u/")
-
-    private fun openWeb(c: LinearLayout, path: String, stayPrefix: String, only: String? = null) {
-        try {
-            val cm = android.webkit.CookieManager.getInstance()
-            cm.setAcceptCookie(true)
-            (java.net.CookieHandler.getDefault() as? java.net.CookieManager)?.cookieStore?.cookies?.forEach {
-                cm.setCookie(Net.BASE, it.name + "=" + it.value + "; Path=/")
+    private fun showBadges() {
+        val c = screen("Mais", "Conquistas", back = { showMore() })
+        val st = skeleton()
+        c.addView(st)
+        async({ NativeData.badges(NativeData.doc(Net.get("/conquistas").body)) }, { pair ->
+            c.removeView(st)
+            sectionTitle(c, "CONQUISTAS", "Suas insígnias")
+            addLine(c, pair.first, 13f, palette.muted)
+            val grid = LinearLayout(this)
+            grid.orientation = LinearLayout.VERTICAL
+            pair.second.chunked(2).forEach { chunk ->
+                val line = LinearLayout(this)
+                line.orientation = LinearLayout.HORIZONTAL
+                line.weightSum = 2f
+                chunk.forEachIndexed { i, b ->
+                    val tile = LinearLayout(this)
+                    tile.orientation = LinearLayout.VERTICAL
+                    tile.gravity = Gravity.CENTER
+                    tile.setPadding(dp(8), dp(14), dp(8), dp(14))
+                    tile.background = rounded(
+                        if (b.locked) palette.surface else tint(palette.accent, 0.08f),
+                        palette.radiusLg.toFloat(),
+                    )
+                    if (b.art != null) {
+                        val iv = ImageView(this)
+                        iv.scaleType = ImageView.ScaleType.FIT_CENTER
+                        iv.layoutParams = LinearLayout.LayoutParams(dp(64), dp(64))
+                        Img.load(b.art, iv, 128)
+                        tile.addView(iv)
+                    } else {
+                        tile.addView(text(if (b.locked) "🔒" else "🏅", 28f))
+                    }
+                    tile.addView(text(b.name, 13f, if (b.locked) palette.muted else palette.text).apply { gravity = Gravity.CENTER }, params().apply { topMargin = dp(8) })
+                    tile.addView(text(b.rarity.ifBlank { b.desc }, 10f, palette.accent).apply { gravity = Gravity.CENTER })
+                    tile.setOnClickListener {
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle(b.name)
+                            .setMessage("${b.rarity}\n\n${b.desc}${if (b.locked) "\n\nAinda bloqueada." else ""}")
+                            .setPositiveButton("Fechar", null)
+                            .show()
+                    }
+                    line.addView(tile, LinearLayout.LayoutParams(0, -2, 1f).apply { if (i == 0) rightMargin = dp(6) else leftMargin = dp(6) })
+                }
+                if (chunk.size == 1) line.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { leftMargin = dp(6) })
+                grid.addView(line, params().apply { bottomMargin = dp(8) })
             }
-            cm.flush()
-        } catch (e: Throwable) {}
-        val wv = android.webkit.WebView(this)
-        wv.setBackgroundColor(Color.rgb(7, 5, 10))
-        wv.settings.javaScriptEnabled = true
-        wv.settings.userAgentString = wv.settings.userAgentString + " ProjectKApp"
-        wv.settings.domStorageEnabled = true
-        wv.settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-        wv.overScrollMode = View.OVER_SCROLL_NEVER
-        wv.setOnTouchListener { v, _ -> v.parent.requestDisallowInterceptTouchEvent(true); false }
-        val css = "header.topbar,.k-side,nav.top-navigation,footer.mobile-navigation,.k-sheet,#k-more-btn{display:none!important}" +
-            "html,body{background:#07050a!important}.main-content{margin:0!important;padding:8px!important;max-width:100%!important;width:100%!important}" +
-            "body{padding:0!important}" +
-            "*{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}" +
-            "body::before,body::after,.aurora,canvas.aurora,#aurora{display:none!important}" +
-            ".z-profile-cover,.z-profile-cover *{animation:none!important}"
-        val onlyJs = if (only == null) "" else "document.querySelectorAll('section.k-card').forEach(function(s){var h=s.querySelector('h2');var ok=s.id==" + org.json.JSONObject.quote(only) + "||(h&&h.textContent.trim()==" + org.json.JSONObject.quote(only) + ");s.style.display=ok?'':'none';});document.querySelectorAll('.main-content nav').forEach(function(n){n.style.display='none'});"
-        val js = "(function(){" + onlyJs + "if(document.getElementById('kapp'))return;var s=document.createElement('style');s.id='kapp';s.textContent=" + org.json.JSONObject.quote(css) + ";document.head.appendChild(s);})()"
-        wv.webChromeClient = object : android.webkit.WebChromeClient() {
-            override fun onShowFileChooser(v: android.webkit.WebView, cb: android.webkit.ValueCallback<Array<android.net.Uri>>, p: FileChooserParams): Boolean {
-                fileCb?.onReceiveValue(null)
-                fileCb = cb
-                return try { startActivityForResult(p.createIntent(), 79); true } catch (e: Throwable) { fileCb = null; false }
-            }
-        }
-        wv.webViewClient = object : android.webkit.WebViewClient() {
-            override fun onPageStarted(v: android.webkit.WebView, url: String?, f: android.graphics.Bitmap?) { v.evaluateJavascript(js, null) }
-            override fun onPageFinished(v: android.webkit.WebView, url: String?) { v.evaluateJavascript(js, null) }
-            override fun shouldOverrideUrlLoading(v: android.webkit.WebView, r: android.webkit.WebResourceRequest): Boolean {
-                val p = r.url.path ?: ""
-                if (p.startsWith("/settings/profile")) { editProfile(); return true }
-                if (r.url.host != android.net.Uri.parse(Net.BASE).host) return true
-                if (p.startsWith("/login")) return true
-                return false
-            }
-        }
-        val lpw = LinearLayout.LayoutParams(-1, resources.displayMetrics.heightPixels - dp(250))
-        c.addView(wv, lpw)
-        c.post {
-            val sv = c.parent as? View
-            if (sv != null && sv.height > 0) { lpw.height = sv.height - dp(6); wv.layoutParams = lpw }
-        }
-        wv.loadUrl(Net.BASE + path)
+            c.addView(grid)
+        }, { m -> st.text = "Falha ao carregar as conquistas: $m" })
     }
 
-    private fun showWebPage(title: String, path: String, only: String? = null, back: () -> Unit = { showMore() }) {
-        val c = screen("Mais", title, back = back)
-        openWeb(c, path, "/", only)
+    private fun showShop(cat: String? = null) {
+        val c = screen("Mais", "Loja K", back = { showMore() })
+        val st = skeleton()
+        c.addView(st)
+        val path = if (cat.isNullOrBlank()) "/loja" else "/loja?cat=" + enc(cat)
+        async({ NativeData.shop(NativeData.doc(Net.get(path).body)) }, { result ->
+            c.removeView(st)
+            sectionTitle(c, "LOJA", "Loja K")
+            val tabsScroll = HorizontalScrollView(this)
+            val tabs = LinearLayout(this)
+            tabs.orientation = LinearLayout.HORIZONTAL
+            for (tab in result.first) {
+                val chip = text(tab.label, 12f, if (tab.active) palette.text else palette.textSoft)
+                chip.setPadding(dp(12), dp(8), dp(12), dp(8))
+                chip.background = rounded(if (tab.active) tint(palette.accent, 0.2f) else palette.surface, palette.radiusSm.toFloat())
+                chip.setOnClickListener {
+                    val slug = tab.href.substringAfterLast('/').substringBefore('?')
+                    showShop(slug)
+                }
+                tabs.addView(chip, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+            }
+            tabsScroll.addView(tabs)
+            c.addView(tabsScroll, params().apply { bottomMargin = dp(12) })
+
+            for (item in result.second) {
+                val card = card()
+                if (item.previewImage != null) card.addView(remoteImage(item.previewImage, 110))
+                else if (item.previewText != null) card.addView(text(item.previewText, 20f, palette.accent).apply { gravity = Gravity.CENTER; setPadding(dp(10), dp(18), dp(10), dp(18)) })
+                addLine(card, item.name, 16f, palette.text)
+                if (item.desc.isNotBlank()) addLine(card, item.desc, 12f, palette.textSoft)
+                if (item.price.isNotBlank()) addLine(card, item.price + " kcoin", 14f, palette.accent)
+                val btn = pill(item.button.ifBlank { "Comprar" }) {
+                    val act = item.action
+                    if (act.isBlank()) { toast("Item indisponível."); return@pill }
+                    val fields = ArrayList<Pair<String, String>>()
+                    if (item.kind.isNotBlank()) fields.add("kind" to item.kind)
+                    if (item.item.isNotBlank()) fields.add("item" to item.item)
+                    val pathAction = try { java.net.URL(act).path } catch (e: Throwable) { act }
+                    submitForm(pathAction, fields) { showShop(cat) }
+                }
+                card.addView(btn, params().apply { topMargin = dp(8) })
+                c.addView(card)
+            }
+            if (result.second.isEmpty()) addLine(c, "Nenhum item nesta categoria.", 13f, palette.muted)
+        }, { m -> st.text = "Falha ao carregar a loja: $m" })
+    }
+
+    private fun showGames() {
+        val c = screen("Mais", "Jogos", back = { showMore() })
+        val st = skeleton()
+        c.addView(st)
+        async({ NativeData.games(NativeData.doc(Net.get("/jogos").body)) }, { games ->
+            c.removeView(st)
+            sectionTitle(c, "ARCADE", "Jogos")
+            addLine(c, "Entre, jogue e ganhe kcoin. Os placares são sempre validados pelo servidor.", 12f, palette.textSoft)
+            val all = games.ifEmpty {
+                listOf(
+                    GameInfo("Jogo do gráfico", "Acompanhe o gráfico e decidiu quando sacar.", "/casino"),
+                    GameInfo("Mines", "Campo minado com multiplicadores.", "/mines"),
+                    GameInfo("Cobrinha", "Clássico com placar no servidor.", "/cobrinha"),
+                    GameInfo("Arcade", "Desafios rápidos por kcoin.", "/arcade"),
+                )
+            }
+            val icons = intArrayOf(R.drawable.ic_apps, R.drawable.ic_seal, R.drawable.ic_people, R.drawable.ic_crown)
+            for ((i, g) in all.withIndex()) {
+                val card = card()
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                row.gravity = Gravity.CENTER_VERTICAL
+                val tile = FrameLayout(this)
+                tile.background = rounded(tint(palette.accent, 0.16f), palette.radiusMd.toFloat())
+                tile.addView(icon(icons[i % icons.size], palette.accent, 22), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+                row.addView(tile, LinearLayout.LayoutParams(dp(44), dp(44)))
+                val col = LinearLayout(this)
+                col.orientation = LinearLayout.VERTICAL
+                col.addView(text(g.name, 16f).apply { typeface = Typeface.DEFAULT_BOLD }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(13) })
+                col.addView(text(g.desc, 12f, palette.textSoft), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(13) })
+                row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+                card.addView(row)
+                card.addView(pill("Jogar") {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Net.abs(g.href))))
+                    } catch (e: Throwable) { toast("Não foi possível abrir.") }
+                }, params().apply { topMargin = dp(10) })
+                c.addView(card)
+            }
+        }, { m -> st.text = "Falha ao carregar os jogos: $m" })
+    }
+
+    private fun showAdmin(tab: String = "overview") {
+        val c = screen("Mais", "Painel admin", back = { showMore() })
+        val st = skeleton()
+        c.addView(st)
+        async({ NativeData.admin(NativeData.doc(Net.get("/admin?tab=" + enc(tab)).body)) }, { data ->
+            c.removeView(st)
+            sectionTitle(c, "ADMINISTRAÇÃO", "Painel")
+            val tabsScroll = HorizontalScrollView(this)
+            val tabs = LinearLayout(this)
+            tabs.orientation = LinearLayout.HORIZONTAL
+            for ((label, key) in listOf(
+                "Visão geral" to "overview", "Denúncias" to "reports", "Apelações" to "appeals",
+                "Usuários" to "users", "Publicações" to "posts", "Registro" to "log",
+            )) {
+                val chip = text(label, 12f, if (tab == key) palette.text else palette.textSoft)
+                chip.setPadding(dp(12), dp(8), dp(12), dp(8))
+                chip.background = rounded(if (tab == key) tint(palette.accent, 0.2f) else palette.surface, palette.radiusSm.toFloat())
+                chip.setOnClickListener { showAdmin(key) }
+                tabs.addView(chip, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+            }
+            tabsScroll.addView(tabs)
+            c.addView(tabsScroll, params().apply { bottomMargin = dp(10) })
+            val atalhos = LinearLayout(this)
+            atalhos.orientation = LinearLayout.HORIZONTAL
+            listOf("Avisos" to "/admin/avisos", "Insígnias" to "/admin/insignias", "Títulos" to "/admin/titulo-honorario").forEach { (l, p) ->
+                atalhos.addView(pill(l) {
+                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Net.abs(p)))) } catch (e: Throwable) { toast("Falha ao abrir.") }
+                }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(4) })
+            }
+            c.addView(atalhos, params().apply { bottomMargin = dp(12) })
+
+            if (data.second.isNotEmpty()) {
+                val g = groupCard(c)
+                data.second.chunked(2).forEach { chunk ->
+                    val line = LinearLayout(this)
+                    line.orientation = LinearLayout.HORIZONTAL
+                    line.weightSum = 2f
+                    chunk.forEachIndexed { i, s ->
+                        val b = LinearLayout(this)
+                        b.orientation = LinearLayout.VERTICAL
+                        b.setPadding(dp(8), dp(10), dp(8), dp(10))
+                        b.addView(text(s.value, 19f, if (s.alert) palette.danger else palette.accent).apply { typeface = Typeface.DEFAULT_BOLD })
+                        b.addView(text(s.label, 11f, palette.muted))
+                        line.addView(b, LinearLayout.LayoutParams(0, -2, 1f).apply { if (i == 0) rightMargin = dp(6) else leftMargin = dp(6) })
+                    }
+                    if (chunk.size == 1) line.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+                    g.addView(line)
+                }
+                g.setPadding(dp(8), dp(10), dp(8), dp(10))
+            }
+            for (r in data.third) {
+                val card = card()
+                val head = LinearLayout(this)
+                head.orientation = LinearLayout.HORIZONTAL
+                head.gravity = Gravity.CENTER_VERTICAL
+                if (r.avatar != null) head.addView(avatarView(r.avatar, r.title, 36))
+                val col = LinearLayout(this)
+                col.orientation = LinearLayout.VERTICAL
+                col.addView(text(r.title, 14f).apply { typeface = Typeface.DEFAULT_BOLD }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(if (r.avatar != null) 10 else 0) })
+                if (r.subtitle.isNotBlank()) col.addView(text(r.subtitle, 11f, palette.muted), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(if (r.avatar != null) 10 else 0) })
+                head.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+                card.addView(head)
+                if (r.actions.isNotEmpty()) {
+                    val acts = LinearLayout(this)
+                    acts.orientation = LinearLayout.HORIZONTAL
+                    r.actions.forEach { (path, label) ->
+                        acts.addView(pill(label) { submitForm(path, listOf("next" to "/admin?tab=$tab")) { showAdmin(tab) } },
+                            LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+                    }
+                    card.addView(acts, params().apply { topMargin = dp(8) })
+                }
+                c.addView(card)
+            }
+            if (data.third.isEmpty() && data.second.isEmpty()) addLine(c, "Nada por aqui.", 13f, palette.muted)
+        }, { m -> st.text = "Falha ao abrir o painel: $m" })
+    }
+
+    private fun showThemePicker() {
+        val c = screen("Mais", "Aparência", back = { showSettings() })
+        addLine(c, "Escolha o tema do app. Os mesmos 12 temas do site.", 13f, palette.textSoft)
+        for (p in KTheme.all) {
+            val card = card()
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_VERTICAL
+            val swatch = View(this)
+            swatch.background = rounded(p.accent, palette.radiusSm.toFloat())
+            row.addView(swatch, LinearLayout.LayoutParams(dp(28), dp(28)))
+            val col = LinearLayout(this)
+            col.orientation = LinearLayout.VERTICAL
+            col.addView(text(p.label, 15f).apply { typeface = Typeface.DEFAULT_BOLD }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(12) })
+            col.addView(text("fundo " + String.format("#%06X", 0xFFFFFF and p.bg), 11f, palette.muted), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(12) })
+            row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+            if (p.key == palette.key) row.addView(text("✓", 18f, palette.accent))
+            card.addView(row)
+            card.setOnClickListener {
+                KTheme.save(this, p.key)
+                applyTheme()
+                showThemePicker()
+            }
+            c.addView(card)
+        }
+    }
+
+    private fun formCard(
+        parent: LinearLayout,
+        title: String,
+        hint: String,
+        action: String,
+        fieldHints: List<String>,
+        fieldNames: List<String>,
+        buttonLabel: String,
+        passwordFields: Set<Int> = emptySet(),
+    ) {
+        val card = card()
+        addLine(card, title, 15f, palette.text)
+        addLine(card, hint, 12f, palette.textSoft)
+        val edits = ArrayList<EditText>()
+        for ((i, h) in fieldHints.withIndex()) {
+            val e = fieldBox(h)
+            if (i in passwordFields) e.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            edits.add(e)
+            card.addView(e, params().apply { topMargin = dp(6) })
+        }
+        card.addView(pill(buttonLabel) {
+            val fields = edits.mapIndexed { i, e -> fieldNames[i] to e.text.toString() }
+            submitForm(action, fields) { toast("Alteração enviada."); showSettings() }
+        }, params().apply { topMargin = dp(10) })
+        parent.addView(card)
     }
 
     private fun showSettings() {
         val c = screen("Mais", "Configurações", back = { showMore() })
-        fun group(vararg items: Triple<String, Pair<Int, Int>, () -> Unit>) {
-            val g = LinearLayout(this)
-            g.orientation = LinearLayout.VERTICAL
-            g.background = GradientDrawable().apply { setColor(Color.rgb(24, 12, 16)); cornerRadius = dp(20).toFloat() }
-            items.forEachIndexed { i, it ->
-                val row = LinearLayout(this)
-                row.orientation = LinearLayout.HORIZONTAL
-                row.gravity = Gravity.CENTER_VERTICAL
-                row.setPadding(dp(14), dp(14), dp(14), dp(14))
-                val tile = FrameLayout(this)
-                tile.background = GradientDrawable().apply { setColor(it.second.second); cornerRadius = dp(9).toFloat() }
-                tile.addView(icon(it.second.first, Color.WHITE, 18), FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
-                row.addView(tile, LinearLayout.LayoutParams(dp(30), dp(30)))
-                row.addView(text(it.first, 16f).apply { setPadding(dp(14), 0, 0, 0) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                row.addView(text("›", 22f, muted))
-                row.setOnClickListener { _ -> it.third() }
-                g.addView(row)
-                if (i < items.size - 1) g.addView(View(this).apply { setBackgroundColor(Color.argb(40, 255, 255, 255)) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(58) })
-            }
-            c.addView(g, params().apply { bottomMargin = dp(14) })
+        sectionTitle(c, "SUA CONTA", "Configurações")
+
+        val g1 = groupCard(c)
+        row(g1, R.drawable.ic_user, palette.accent, "Perfil", "Nome, foto, capa, bio e status.") { editProfile() }
+        row(g1, R.drawable.ic_apps, palette.info, "Aparência", "Tema: ${palette.label}") { showThemePicker() }
+        row(g1, R.drawable.ic_mail, Color.rgb(66, 133, 244), "Conta", "E-mail e senha.") { showAccountSettings() }
+
+        val g2 = groupCard(c)
+        row(g2, R.drawable.ic_chat, Color.rgb(88, 101, 242), "Discord", "Ligar conta e avisos por DM.") { showDiscordSettings() }
+        row(g2, R.drawable.ic_block, palette.muted, "Usuários bloqueados", "Gerir quem você bloqueou.") { showBlocked() }
+        row(g2, R.drawable.ic_info, palette.info, "Ajuda e informações", "Termos, privacidade e sair.") { showHelpSettings() }
+        row(g2, R.drawable.ic_trash, palette.danger, "Excluir conta", "Zona de perigo.") { showDeleteAccount() }
+    }
+
+    private fun showAccountSettings() {
+        val c = screen("Mais", "Conta", back = { showSettings() })
+        sectionTitle(c, "CONTA", "E-mail e senha")
+        formCard(c, "Alterar e-mail", "Novo e-mail e sua senha atual.", "/settings/email",
+            listOf("Novo e-mail", "Sua senha"), listOf("email", "password"), "Alterar e-mail", setOf(1))
+        formCard(c, "Alterar senha", "Mínimo de 8 caracteres.", "/settings/password",
+            listOf("Senha atual", "Nova senha", "Confirmar nova senha"),
+            listOf("current_password", "new_password", "confirm_password"), "Alterar senha", setOf(0, 1, 2))
+    }
+
+    private fun showDiscordSettings() {
+        val c = screen("Mais", "Discord", back = { showSettings() })
+        sectionTitle(c, "DISCORD", "Sua conta Discord")
+        addLine(c, "Avinque o Discord para entrar com um clique e receber avisos no seu privado.", 12f, palette.textSoft)
+        c.addView(pill("Ligar / entrar com Discord") { discordLogin() }, params().apply { topMargin = dp(6); bottomMargin = dp(14) })
+        val g = groupCard(c)
+        row(g, R.drawable.ic_bell, Color.rgb(88, 101, 242), "Ativar avisos por DM") {
+            submitForm("/discord/dm", listOf("on" to "1")) { toast("Avisos atualizados.") }
         }
-        val back = { showSettings() }
-        group(
-            Triple("Editar perfil", Pair(R.drawable.ic_user, Color.rgb(225, 29, 46))) { editProfile() },
-            Triple("Conta (e-mail e senha)", Pair(R.drawable.ic_mail, Color.rgb(66, 133, 244))) { showWebPage("Conta", "/settings", "conta", back) },
-            Triple("Privacidade", Pair(R.drawable.ic_lock, Color.rgb(52, 168, 83))) { showWebPage("Privacidade", "/settings", "privacidade", back) }
-        )
-        group(
-            Triple("Discord", Pair(R.drawable.ic_chat, Color.rgb(88, 101, 242))) { showWebPage("Discord", "/settings", "discord", back) },
-            Triple("Avisos no Discord", Pair(R.drawable.ic_bell, Color.rgb(88, 101, 242))) { showWebPage("Avisos", "/settings", "discord-avisos", back) },
-            Triple("Usuários bloqueados", Pair(R.drawable.ic_block, Color.rgb(110, 110, 120))) { showWebPage("Bloqueados", "/settings", "Usuários bloqueados", back) }
-        )
-        group(
-            Triple("Enviar feedback", Pair(R.drawable.ic_feedback, Color.rgb(245, 124, 0))) { showWebPage("Feedback", "/settings", "feedback", back) },
-            Triple("Ajuda e informações", Pair(R.drawable.ic_info, Color.rgb(212, 160, 0))) { showWebPage("Ajuda", "/settings", "ajuda", back) },
-            Triple("Excluir conta", Pair(R.drawable.ic_trash, Color.rgb(160, 20, 30))) { showWebPage("Excluir conta", "/settings", "Excluir conta", back) }
-        )
+        row(g, R.drawable.ic_bell, palette.muted, "Desativar avisos por DM") {
+            submitForm("/discord/dm", listOf("on" to "0")) { toast("Avisos atualizados.") }
+        }
+        row(g, R.drawable.ic_block, palette.danger, "Desligar Discord") {
+            submitForm("/auth/discord/desligar", emptyList()) { toast("Discord desligado."); showSettings() }
+        }
+    }
+
+    private fun showBlocked() {
+        val c = screen("Mais", "Bloqueados", back = { showSettings() })
+        val st = skeleton()
+        c.addView(st)
+        async({ NativeData.doc(Net.get("/settings").body) }, { d ->
+            c.removeView(st)
+            sectionTitle(c, "PRIVACIDADE", "Usuários bloqueados")
+            addLine(c, "Quem você bloqueia não vê seu perfil, não te manda mensagem e some do feed.", 12f, palette.textSoft)
+            val card = card()
+            val sec = d.select("section#privacidade").firstOrNull()
+            val people = sec?.select("div.k-row") ?: org.jsoup.Jsoup.parse("<div></div>").select("div.k-row")
+            if (people.isEmpty()) addLine(card, "Você não bloqueou ninguém.", 13f, palette.muted)
+            for (p in people) {
+                val name = p.select("strong").firstOrNull()?.text()?.trim().orEmpty()
+                val user = p.select("span.k-muted").firstOrNull()?.text()?.trim().orEmpty()
+                val r = LinearLayout(this)
+                r.orientation = LinearLayout.HORIZONTAL
+                r.gravity = Gravity.CENTER_VERTICAL
+                val col = LinearLayout(this)
+                col.orientation = LinearLayout.VERTICAL
+                col.addView(text(name.ifBlank { user }, 14f), LinearLayout.LayoutParams(0, -2, 1f))
+                r.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+                val path = p.select("form").firstOrNull()?.attr("action").orEmpty()
+                if (path.isNotBlank()) r.addView(pill("Desbloquear") {
+                    submitForm(path, listOf("action" to "unblock", "next" to "/settings#privacidade")) { showBlocked() }
+                })
+                card.addView(r, params().apply { topMargin = dp(8) })
+            }
+            c.addView(card)
+        }, { m -> st.text = "Falha: $m" })
+    }
+
+    private fun showHelpSettings() {
+        val c = screen("Mais", "Ajuda", back = { showSettings() })
+        sectionTitle(c, "AJUDA", "Informações")
+        val g = groupCard(c)
+        row(g, R.drawable.ic_info, palette.info, "Termos de uso") { openExternal("/termos") }
+        row(g, R.drawable.ic_lock, palette.info, "Privacidade") { openExternal("/privacidade") }
+        row(g, R.drawable.ic_feedback, palette.accent, "Enviar feedback") { openExternal("/settings#ajuda") }
+        row(g, R.drawable.ic_user, palette.danger, "Sair da conta") { logout() }
+    }
+
+    private fun showDeleteAccount() {
+        val c = screen("Mais", "Excluir conta", back = { showSettings() })
+        sectionTitle(c, "ZONA DE PERIGO", "Excluir conta")
+        addLine(c, "Sua conta passa a se chamar “Unknown”. Por 30 dias você pode recuperá-la entrando de novo. Depois disso perfil, publicações, mensagens, carteira e itens são apagados de vez.", 12f, palette.textSoft)
+        formCard(c, "Confirmar exclusão", "Senha e seu @ para confirmar.", "/settings/delete",
+            listOf("Sua senha", "Digite seu @"), listOf("password", "confirm_username"),
+            "Excluir minha conta", setOf(0))
+    }
+
+    private fun openExternal(path: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Net.abs(path))))
+        } catch (e: Throwable) { toast("Não foi possível abrir.") }
+    }
+
+    // ---------- Cabeçalho nativo do perfil ----------
+    private fun addProfileHeader(c: LinearLayout, p: br.com.projectk.nativeapp.Profile) {
+        val extras = try {
+            NativeData.profileExtras(NativeData.doc(Net.get("/u/" + enc(p.username) + "?app=1").body))
+        } catch (e: Throwable) {
+            NativeData.ProfileExtras(p.cover, null, p.frame, null, null, "", null, emptyList())
+        }
+
+        val cover = remoteImage(extras.cover ?: p.cover, 116)
+        cover.adjustViewBounds = true
+        c.addView(cover, params().apply { bottomMargin = 0 })
+
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.VERTICAL
+        head.setPadding(dp(16), dp(12), dp(16), dp(14))
+        head.background = rounded(palette.surface, palette.radiusLg.toFloat())
+
+        val avatar = avatarView(extras.avatar ?: p.avatar, p.name, 84, extras.frame ?: p.frame)
+        (avatar.layoutParams as? LinearLayout.LayoutParams)?.gravity = Gravity.CENTER_HORIZONTAL
+        head.addView(avatar)
+
+        val name = text(p.name, 19f).apply {
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(0, dp(10), 0, 0)
+        }
+        head.addView(name, params())
+        head.addView(text("@" + p.username, 13f, palette.muted).apply { gravity = Gravity.CENTER })
+
+        val status = extras.status ?: p.status
+        if (!status.isNullOrBlank()) {
+            val bubble = text("💬  $status", 12f, palette.textSoft)
+            bubble.setPadding(dp(12), dp(8), dp(12), dp(8))
+            bubble.background = rounded(tint(palette.accent, 0.12f), palette.radiusSm.toFloat())
+            head.addView(bubble, params().apply { topMargin = dp(8) })
+        }
+
+        val honorName = extras.honorName
+        if (!honorName.isNullOrBlank()) {
+            val honor = LinearLayout(this)
+            honor.orientation = LinearLayout.HORIZONTAL
+            honor.gravity = Gravity.CENTER_VERTICAL
+            honor.setPadding(dp(10), dp(7), dp(10), dp(7))
+            honor.background = rounded(tint(Color.rgb(127, 224, 255), 0.14f), 99f)
+            if (extras.honorArt != null) {
+                val art = ImageView(this)
+                art.scaleType = ImageView.ScaleType.FIT_CENTER
+                art.layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
+                Img.load(extras.honorArt, art, 64)
+                honor.addView(art)
+            }
+            honor.addView(text(honorName, 12f, Color.rgb(223, 246, 255)).apply { typeface = Typeface.DEFAULT_BOLD }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
+            honor.addView(text("ⓘ", 12f, Color.rgb(127, 224, 255)), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
+            honor.setOnClickListener {
+                val detail = try {
+                    val o = JSONObject(extras.honorJson)
+                    "Título honorário\n\n${o.optString("name")}\n\n${o.optString("description").ifBlank { o.optString("desc") }}"
+                } catch (e: Throwable) { "Título honorário\n\n$honorName" }
+                android.app.AlertDialog.Builder(this).setTitle("Título honorário").setMessage(detail).setPositiveButton("Fechar", null).show()
+            }
+            head.addView(honor, params().apply { topMargin = dp(8) })
+        }
+
+        val badges = extras.badges
+        if (badges.isNotEmpty()) {
+            val strip = HorizontalScrollView(this)
+            val line = LinearLayout(this)
+            line.orientation = LinearLayout.HORIZONTAL
+            for (b in badges) {
+                val chip = text("✦ " + b.name, 11f, palette.textSoft)
+                chip.setPadding(dp(10), dp(6), dp(10), dp(6))
+                chip.background = rounded(tint(palette.accent, 0.12f), 99f)
+                chip.setOnClickListener {
+                    android.app.AlertDialog.Builder(this)
+                        .setTitle(b.name)
+                        .setMessage("${b.rarity}\n\n${b.desc}")
+                        .setPositiveButton("Fechar", null).show()
+                }
+                line.addView(chip, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+            }
+            strip.addView(line)
+            head.addView(strip, params().apply { topMargin = dp(10) })
+        }
+
+        if (p.stats.isNotEmpty()) {
+            val statsRow = LinearLayout(this)
+            statsRow.orientation = LinearLayout.HORIZONTAL
+            statsRow.weightSum = p.stats.size.toFloat()
+            for (s in p.stats) {
+                val box = LinearLayout(this)
+                box.orientation = LinearLayout.VERTICAL
+                box.gravity = Gravity.CENTER
+                box.addView(text(s.second, 16f, palette.accent).apply { typeface = Typeface.DEFAULT_BOLD })
+                box.addView(text(s.first, 10f, palette.muted))
+                statsRow.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
+            }
+            head.addView(statsRow, params().apply { topMargin = dp(12) })
+        }
+        c.addView(head, params().apply { topMargin = dp(-18); bottomMargin = dp(14) })
     }
 
     private fun showProfile(username: String?) {
@@ -1803,7 +2462,7 @@ class MainActivity : Activity() {
             Parse.profile(d, u, u == meUser)
         }, { p ->
             c.removeView(st)
-            openWebHeader(c, p.username)
+            addProfileHeader(c, p)
             if (p.isMe) {
                 c.addView(pill("Editar perfil") { editProfile() }, params().apply { bottomMargin = dp(8) })
                 c.addView(pill("Sair da conta") { logout() }, params().apply { bottomMargin = dp(14) })
@@ -1963,40 +2622,45 @@ class MainActivity : Activity() {
         fun group(vararg items: Triple<String, Pair<Int, Int>, () -> Unit>) {
             val g = LinearLayout(this)
             g.orientation = LinearLayout.VERTICAL
-            g.background = GradientDrawable().apply { setColor(Color.rgb(24, 12, 16)); cornerRadius = dp(20).toFloat() }
+            g.background = rounded(palette.surface, palette.radiusLg.toFloat())
             items.forEachIndexed { i, it ->
                 val row = LinearLayout(this)
                 row.orientation = LinearLayout.HORIZONTAL
                 row.gravity = Gravity.CENTER_VERTICAL
                 row.setPadding(dp(14), dp(12), dp(14), dp(12))
                 val tile = FrameLayout(this)
-                tile.background = GradientDrawable().apply { setColor(it.second.second); cornerRadius = dp(9).toFloat() }
-                tile.addView(icon(it.second.first, Color.WHITE, 20), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+                tile.background = rounded(tint(it.second.second, 0.16f), palette.radiusSm.toFloat())
+                tile.addView(icon(it.second.first, it.second.second, 20), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
                 row.addView(tile, LinearLayout.LayoutParams(dp(34), dp(34)))
                 row.addView(text(it.first, 16f).apply { setPadding(dp(14), 0, 0, 0) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                row.addView(text("›", 22f, muted))
+                row.addView(text("›", 22f, palette.muted))
                 row.setOnClickListener { _ -> it.third() }
                 g.addView(row)
-                if (i < items.size - 1) g.addView(View(this).apply { setBackgroundColor(Color.argb(40, 255, 255, 255)) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(62) })
+                if (i < items.size - 1) g.addView(View(this).apply { setBackgroundColor(tint(palette.border, 0.7f)) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(62) })
             }
             c.addView(g, params().apply { bottomMargin = dp(14) })
         }
-        val green = Color.rgb(52, 168, 83); val red = Color.rgb(225, 29, 46); val blue = Color.rgb(66, 133, 244)
-        val orange = Color.rgb(245, 124, 0); val yellow = Color.rgb(212, 160, 0); val pink = Color.rgb(214, 51, 132); val gray = Color.rgb(110, 110, 120)
+        val green = palette.success
+        val red = palette.accent
+        val blue = palette.info
+        val orange = Color.rgb(245, 124, 0)
+        val yellow = Color.rgb(212, 160, 0)
+        val pink = Color.rgb(214, 51, 132)
+        val gray = palette.muted
         group(
             Triple("Meu perfil", Pair(R.drawable.ic_people, red)) { showProfile(null) },
             Triple("Notificações", Pair(R.drawable.ic_bell, orange)) { showNotifs() },
-            Triple("Conquistas", Pair(R.drawable.ic_crown, yellow)) { showWebPage("Conquistas", "/conquistas") },
-            Triple("Tarefas", Pair(R.drawable.ic_seal, green)) { showWebPage("Tarefas", "/tarefas") }
+            Triple("Conquistas", Pair(R.drawable.ic_crown, yellow)) { showBadges() },
+            Triple("Tarefas", Pair(R.drawable.ic_seal, green)) { showTasks() }
         )
         group(
-            Triple("Loja", Pair(R.drawable.ic_crown, pink)) { showWebPage("Loja", "/loja") },
-            Triple("Carteira", Pair(R.drawable.ic_seal, blue)) { showWebPage("Carteira", "/carteira") },
-            Triple("Jogos", Pair(R.drawable.ic_apps, green)) { showWebPage("Jogos", "/jogos") }
+            Triple("Loja", Pair(R.drawable.ic_crown, pink)) { showShop() },
+            Triple("Carteira", Pair(R.drawable.ic_seal, blue)) { showWallet() },
+            Triple("Jogos", Pair(R.drawable.ic_apps, green)) { showGames() }
         )
         val last = ArrayList<Triple<String, Pair<Int, Int>, () -> Unit>>()
         last.add(Triple("Configurações", Pair(R.drawable.ic_shield, gray)) { showSettings() })
-        if (isAdminUser) last.add(Triple("Painel admin", Pair(R.drawable.ic_shield, red)) { showWebPage("Painel admin", "/admin") })
+        if (isAdminUser) last.add(Triple("Painel admin", Pair(R.drawable.ic_shield, red)) { showAdmin() })
         last.add(Triple("Atualização do app", Pair(R.drawable.ic_dns, blue)) { checkUpdate(true) })
         last.add(Triple("Sair da conta", Pair(R.drawable.ic_plus, red)) { logout() })
         group(*last.toTypedArray())
