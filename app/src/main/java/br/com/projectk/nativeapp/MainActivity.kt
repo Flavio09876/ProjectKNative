@@ -369,25 +369,19 @@ class MainActivity : Activity() {
 
         addSpace(34)
 
-        val logo = TextView(this).apply {
-            text = "K"
-            textSize = 34f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            typeface = Typeface.DEFAULT_BOLD
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(palette.accent)
-            }
+        val logo = ImageView(this).apply {
+            setImageResource(R.drawable.splash_icon)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Project K"
         }
-        root.addView(logo, LinearLayout.LayoutParams(dp(64), dp(64)).apply {
+        root.addView(logo, LinearLayout.LayoutParams(dp(72), dp(72)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
             bottomMargin = dp(16)
         })
 
         root.addView(label("Project K", 26f).apply {
             gravity = Gravity.CENTER
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = KUi.displayTypeface(palette)
             setTextColor(palette.text)
         }, params())
 
@@ -412,7 +406,7 @@ class MainActivity : Activity() {
                 setSingleLine(true)
                 setPadding(dp(14), dp(12), dp(14), dp(12))
                 background = KUi.field(palette, dp(10).toFloat())
-                typeface = Typeface.DEFAULT
+                typeface = KUi.bodyTypeface(palette)
                 inputType = if (pass) {
                     android.text.InputType.TYPE_CLASS_TEXT or
                         android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -1097,7 +1091,7 @@ class MainActivity : Activity() {
             top.addView(b)
         }
         val t = text(title, 24f)
-        t.typeface = Typeface.DEFAULT_BOLD
+        t.typeface = KUi.displayTypeface(palette)
         t.maxLines = 1
         t.ellipsize = TextUtils.TruncateAt.END
         t.setTextColor(palette.text)
@@ -1163,7 +1157,7 @@ class MainActivity : Activity() {
             ico.alpha = if (on) 1f else 0.8f
             col.addView(ico)
             val l = text(name, 10f, color).apply {
-                typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                typeface = KUi.displayTypeface(palette)
                 gravity = Gravity.CENTER
                 setPadding(0, dp(2), 0, 0)
             }
