@@ -2,17 +2,24 @@ package br.com.projectk.nativeapp
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Outline
+import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.webkit.WebView
 import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.TextView
 
 /**
- * Moldura criada pela comunidade (`.uf-N`) renderizada exatamente como no site.
+ * Moldura criada pela comunidade, montada como no Project Z:
+ * avatar oval nativo + overlay de imagem sobre ele.
  *
- * O WebView é um componente decorativo de poucos centímetros — não é uma tela
- * nem um WebView de navegação. Ele recebe só o CSS original da criação e um
- * avatar, reproduzindo keyframes, GIFs e camadas da mesma forma que o site K.
+ * Quando a criação tem mídia enviada (`media_url`, PNG/GIF/WebP), o overlay é
+ * carregado pelo mesmo caminho do Z: URL → decodificador → ImageView. Sem
+ * WebView. Para criações que são só CSS, usa-se um componente decorativo
+ * minúsculo com o CSS original, sem virar tela nem navegação.
  */
 class CommunityFrameView(
     context: Context,
@@ -23,28 +30,55 @@ class CommunityFrameView(
 ) : FrameLayout(context) {
 
     init {
-        val frameWidth = (avatarSizePx * 0.11f).toInt().coerceAtLeast(4)
-        val total = avatarSizePx + frameWidth * 2
-        val avatar = avatarUrl?.let { Net.abs(it) ?: it }
-        val css = Frames.cssOf(frameKey).orEmpty()
-
-        val web = WebView(context).apply {
-            setBackgroundColor(Color.TRANSPARENT)
-            settings.javaScriptEnabled = false
-            settings.loadWithOverviewMode = true
-            settings.useWideViewPort = false
-            settings.setSupportZoom(false)
-            settings.mediaPlaybackRequiresUserGesture = false
-            isFocusable = false
-            isClickable = false
-            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
-            loadDataWithBaseURL(
-                Net.BASE + "/",
-                page(css, avatar, label, avatarSizePx, frameWidth),
-                "text/html", "UTF-8", null,
-            )
+        val pad = (avatarSizePx * 0.16f).toInt().coerceAtLeast(6)
+        val total = avatarSizePx + pad * 2
+        val oval = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setOval(0, 0, view.width, view.height)
+            }
         }
-        addView(web, LayoutParams(total, total, Gravity.CENTER))
+
+        val avatar: View = if (!avatarUrl.isNullOrBlank()) {
+            ImageView(context).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                clipToOutline = true
+                outlineProvider = oval
+                Img.load(avatarUrl, this, avatarSizePx)
+            }
+        } else {
+            TextView(context).apply {
+                text = (label?.trim()?.firstOrNull() ?: 'K').uppercaseChar().toString()
+                gravity = Gravity.CENTER
+                textSize = avatarSizePx / 2.6f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.WHITE)
+                setBackgroundColor(Color.rgb(42, 43, 50))
+            }
+        }
+        addView(avatar, LayoutParams(avatarSizePx, avatarSizePx, Gravity.CENTER))
+
+        val frameUrl = Frames.get(frameKey)?.url
+        if (!frameUrl.isNullOrBlank()) {
+            Crash.mark(context, "frame")
+            addView(ImageView(context).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                adjustViewBounds = true
+                Img.loadAnimated(frameUrl, this, total)
+            }, LayoutParams(total, total, Gravity.CENTER))
+        } else {
+            val css = Frames.cssOf(frameKey).orEmpty()
+            if (css.isNotBlank()) {
+                addView(WebView(context).apply {
+                    setBackgroundColor(Color.TRANSPARENT)
+                    settings.javaScriptEnabled = false
+                    settings.setSupportZoom(false)
+                    isFocusable = false
+                    isClickable = false
+                    setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+                    loadDataWithBaseURL(Net.BASE + "/", page(css, avatarUrl, label), "text/html", "UTF-8", null)
+                }, LayoutParams(total, total, Gravity.CENTER))
+            }
+        }
         layoutParams = android.widget.LinearLayout.LayoutParams(total, total)
     }
 
@@ -55,16 +89,10 @@ class CommunityFrameView(
         .replace("<", "&lt;")
         .replace(">", "&gt;")
 
-    private fun page(
-        css: String,
-        avatar: String?,
-        label: String?,
-        sizePx: Int,
-        fwPx: Int,
-    ): String {
+    private fun page(css: String, avatarUrl: String?, label: String?): String {
         val initial = (label?.trim()?.firstOrNull() ?: 'K').uppercaseChar().toString()
-        val inner = if (!avatar.isNullOrBlank()) {
-            "<img src=\"${esc(avatar)}\" alt=\"\">"
+        val inner = if (!avatarUrl.isNullOrBlank()) {
+            "<img src=\"${esc(Net.abs(avatarUrl) ?: avatarUrl)}\" alt=\"\">"
         } else {
             "<div class=\"k-frame__ph\">${esc(initial)}</div>"
         }
@@ -72,8 +100,8 @@ class CommunityFrameView(
             <!doctype html><html><head><meta charset="utf-8"><style>
             *{margin:0;padding:0;box-sizing:border-box}
             html,body{width:100%;height:100%;background:transparent;overflow:hidden}
-            .k-frame,.uf{--sz:${sizePx}px;--fw:${fwPx}px;position:relative;display:inline-grid;place-items:center;width:100%;height:100%;border-radius:50%;flex:none}
-            .k-frame>img,.k-frame>.k-frame__ph,.uf>img,.uf>.k-frame__ph{position:relative;z-index:2;width:var(--sz);height:var(--sz);border-radius:50%;object-fit:cover;background:#2a2b32;display:grid;place-items:center;font-weight:800;color:#fff}
+            .k-frame,.uf{--fw:6px;position:relative;display:inline-grid;place-items:center;width:100%;height:100%;border-radius:50%}
+            .k-frame>img,.k-frame>.k-frame__ph,.uf>img,.uf>.k-frame__ph{position:relative;z-index:2;width:calc(100% - var(--fw)*2);height:calc(100% - var(--fw)*2);border-radius:50%;object-fit:cover;background:#2a2b32;display:grid;place-items:center;font-weight:800;color:#fff}
             .k-frame::before,.k-frame::after,.uf::before,.uf::after{content:"";position:absolute;border-radius:50%;pointer-events:none}
             @keyframes kf-spin{to{transform:rotate(360deg)}}
             @keyframes kf-pulse{0%,100%{box-shadow:0 0 6px 1px #ff2d40,inset 0 0 6px 1px #ff2d40}50%{box-shadow:0 0 22px 6px #ff2d40,inset 0 0 12px 3px #ff2d40}}

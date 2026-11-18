@@ -3,6 +3,10 @@ package br.com.projectk.nativeapp
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.ImageDecoder
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
+import android.os.Build
 import android.util.LruCache
 import android.widget.ImageView
 import com.caverock.androidsvg.SVG
@@ -121,6 +125,44 @@ object Img {
                     view.alpha = 0f
                     view.setImageBitmap(bmp)
                     view.animate().alpha(1f).setDuration(180).start()
+                }
+            }
+        }
+    }
+
+    /** Carrega PNG/GIF/WebP como drawable; GIF/WebP animam como no Project Z. */
+    fun loadAnimated(url: String?, view: ImageView, maxW: Int = 512) {
+        view.tag = url
+        view.setImageDrawable(null)
+        if (url == null) return
+        pool.execute {
+            val data = try { fetch(url) } catch (e: Throwable) { null }
+            var drawable: Drawable? = null
+            if (data != null && Build.VERSION.SDK_INT >= 28) {
+                drawable = try {
+                    val source = ImageDecoder.createSource(java.nio.ByteBuffer.wrap(data))
+                    ImageDecoder.decodeDrawable(source) { decoder, info, _ ->
+                        if (info.size.width > maxW) {
+                            val h = maxOf(1, info.size.height * maxW / info.size.width)
+                            decoder.setTargetSize(maxW, h)
+                        }
+                    }
+                } catch (e: Throwable) { null }
+            }
+            if (drawable == null && data != null) {
+                val bmp = try { decode(data, maxW) } catch (e: Throwable) { null }
+                if (bmp != null) drawable = BitmapDrawable(view.resources, bmp)
+            }
+            val d = drawable ?: return@execute
+            view.post {
+                if (view.tag == url) {
+                    view.alpha = 0f
+                    view.setImageDrawable(d)
+                    view.animate().alpha(1f).setDuration(120).start()
+                    if (Build.VERSION.SDK_INT >= 28 && d is android.graphics.drawable.AnimatedImageDrawable) {
+                        d.loopCount = android.graphics.ImageDecoder.LOOP_INFINITE
+                        d.start()
+                    }
                 }
             }
         }
