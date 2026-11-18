@@ -3,7 +3,6 @@ package br.com.projectk.nativeapp
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Outline
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
@@ -11,7 +10,6 @@ import android.view.ViewOutlineProvider
 import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.TextView
 
 /**
  * Moldura criada pela comunidade, montada como no Project Z:
@@ -54,13 +52,17 @@ class CommunityFrameView(
                 Img.load(avatarUrl, this, avatarSizePx)
             }
         } else {
-            TextView(context).apply {
-                text = (label?.trim()?.firstOrNull() ?: 'K').uppercaseChar().toString()
-                gravity = Gravity.CENTER
-                textSize = avatarSizePx / 2.6f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.rgb(42, 43, 50))
+            ImageView(context).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setImageResource(R.drawable.null_user_icon_big)
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.rgb(42, 43, 50))
+                    setStroke(dp(1), Color.WHITE)
+                }
+                clipToOutline = true
+                outlineProvider = oval
+                contentDescription = label
             }
         }
         addView(avatar, LayoutParams(avatarSizePx, avatarSizePx, Gravity.CENTER))

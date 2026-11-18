@@ -1,6 +1,7 @@
 package br.com.projectk.nativeapp
 
 import android.animation.ValueAnimator
+import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -11,12 +12,26 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.animation.DecelerateInterpolator
+import androidx.core.content.res.ResourcesCompat
 
 /**
  * Camada visual "level 2" — limpa e sólida, no estilo WhatsApp iOS com a
  * paleta do site K. Sem vidro exagerado, grão, meteoros ou brilho.
  */
 object KUi {
+    private var bodyFont: Typeface? = null
+    private var displayFont: Typeface? = null
+
+    /** Carrega as fontes portadas do Project Z uma única vez. */
+    fun init(ctx: Context) {
+        if (bodyFont == null) bodyFont = try {
+            ResourcesCompat.getFont(ctx, R.font.montserrat_regular)
+        } catch (e: Throwable) { Typeface.DEFAULT }
+        if (displayFont == null) displayFont = try {
+            ResourcesCompat.getFont(ctx, R.font.montserrat_semi_bold)
+        } catch (e: Throwable) { Typeface.DEFAULT_BOLD }
+    }
+
     fun alpha(color: Int, a: Float): Int = Color.argb(
         (255 * a.coerceIn(0f, 1f)).toInt(),
         Color.red(color), Color.green(color), Color.blue(color),
@@ -31,8 +46,8 @@ object KUi {
         )
     }
 
-    fun bodyTypeface(p: KPalette): Typeface = Typeface.DEFAULT
-    fun displayTypeface(p: KPalette): Typeface = Typeface.DEFAULT_BOLD
+    fun bodyTypeface(p: KPalette): Typeface = bodyFont ?: Typeface.DEFAULT
+    fun displayTypeface(p: KPalette): Typeface = displayFont ?: Typeface.DEFAULT_BOLD
 
     fun button(p: KPalette, radiusPx: Float, primary: Boolean): Drawable =
         GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,

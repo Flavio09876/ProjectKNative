@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: projectk-native-apk
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -43,4 +47,11 @@ jobs:
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk ProjectK-debug.apk
           gh release delete apk-latest --cleanup-tag -y || true
-          gh release create apk-latest ProjectK-debug.apk --title "APK mais recente" --notes "build ${{ github.run_number }} commit ${{ github.sha }}" --prerelease
+          for i in $(seq 1 10); do
+            git ls-remote --tags origin refs/tags/apk-latest | grep -q . || break
+            sleep 3
+          done
+          for i in $(seq 1 3); do
+            gh release create apk-latest ProjectK-debug.apk --title "APK mais recente" --notes "build ${{ github.run_number }} commit ${{ github.sha }}" --prerelease && break
+            sleep 5
+          done

@@ -121,6 +121,7 @@ class MainActivity : Activity() {
         var etapa = "tema"
         var superCalled = false
         try {
+            KUi.init(applicationContext)
             applyTheme()
             Img.init(applicationContext)
             Crash.install(applicationContext)
@@ -161,12 +162,22 @@ class MainActivity : Activity() {
             val restored = restoreCookies()
             Crash.mark(this, if (restored) "step_restored" else "step_no_cookie")
             if (restored) {
-                val splash = TextView(this).apply {
-                    text = "Entrando…"
-                    textSize = 16f
-                    setTextColor(Color.LTGRAY)
+                val splash = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER
                     setBackgroundColor(bg)
+                    addView(ImageView(this@MainActivity).apply {
+                        setImageResource(R.drawable.splash_icon)
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                    }, LinearLayout.LayoutParams(dp(76), dp(76)))
+                    addView(ImageView(this@MainActivity).apply {
+                        setImageResource(R.drawable.splash_text)
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                    }, LinearLayout.LayoutParams(dp(150), dp(38)).apply { topMargin = dp(12) })
+                    addView(text("Entrando…", 14f, Color.LTGRAY).apply {
+                        gravity = Gravity.CENTER
+                        typeface = KUi.displayTypeface(palette)
+                    }, params().apply { topMargin = dp(18) })
                 }
                 setContentView(splash)
                 Crash.mark(this, "step_session")
@@ -828,6 +839,7 @@ class MainActivity : Activity() {
             textSize = size
             setTextColor(color)
             setPadding(dp(2), dp(3), dp(2), dp(3))
+            typeface = KUi.bodyTypeface(palette)
         }
     }
 
@@ -1135,13 +1147,19 @@ class MainActivity : Activity() {
             setStroke(1, KUi.alpha(palette.border, 0.55f))
             cornerRadius = dp(18).toFloat()
         }
-        fun slot(name: String, res: Int) {
+        fun slot(name: String, res: Int, zOn: Int = 0, zOff: Int = 0) {
             val col = LinearLayout(this)
             col.orientation = LinearLayout.VERTICAL
             col.gravity = Gravity.CENTER
             val on = name == tab
             val color = if (on) palette.accent else palette.muted
-            val ico = icon(res, color, if (on) 25 else 23)
+            val ico = if (zOn != 0 && zOff != 0) {
+                ImageView(this).apply {
+                    setImageResource(if (on) zOn else zOff)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    layoutParams = LinearLayout.LayoutParams(dp(if (on) 27 else 25), dp(if (on) 27 else 25))
+                }
+            } else icon(res, color, if (on) 25 else 23)
             ico.alpha = if (on) 1f else 0.8f
             col.addView(ico)
             val l = text(name, 10f, color).apply {
@@ -1153,8 +1171,8 @@ class MainActivity : Activity() {
             col.setOnClickListener { KUi.press(col); openTab(name) }
             nav.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
-        slot("Início", R.drawable.ic_home)
-        slot("Salas", R.drawable.ic_people)
+        slot("Início", R.drawable.ic_home, R.drawable.ic_tab_discover_selected, R.drawable.ic_tab_discover)
+        slot("Salas", R.drawable.ic_people, R.drawable.ic_tab_circle_selected, R.drawable.ic_tab_circle)
         slot("Servidores", R.drawable.ic_dns)
         val plus = FrameLayout(this)
         plus.background = GradientDrawable().apply {
@@ -1164,7 +1182,7 @@ class MainActivity : Activity() {
         plus.addView(icon(R.drawable.ic_plus, Color.WHITE, 24), FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
         plus.setOnClickListener { KUi.press(plus); newPost() }
         nav.addView(plus, LinearLayout.LayoutParams(dp(46), dp(46)).apply { leftMargin = dp(6); rightMargin = dp(6) })
-        slot("Chat", R.drawable.ic_chat)
+        slot("Chat", R.drawable.ic_chat, R.drawable.ic_tab_chat_selected, R.drawable.ic_tab_chat)
         slot("Mais", R.drawable.ic_apps)
         return nav
     }
